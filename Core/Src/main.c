@@ -21,7 +21,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "bmp280.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -79,6 +79,36 @@ static void MX_USART6_UART_Init(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+BMP280_HandleTypedef bmp280;
+
+
+/*Si queremos utilizar I2C
+bmp.comm_mode=BMP280_MODE_I2C;
+bmp.i2c=&hi2c1;
+bmp.addr=BMP280_I2C_ADDRESS_0;
+ */
+
+//Si queremos utilizar SPI
+bmp.comm_mode=BMP280_MODE_SPI;
+bmp.spi=&hspi1;
+bmp.cs_port=GPIOA;
+bmp.cs_pin=GPIO_PIN_12;
+
+bmp280_params_t parametro_bmp280;
+bmp280_init_default_params(bmp280_params_t &parametro_bmp280);
+
+//----- Aqui va el cambio de parametros ----
+
+
+
+
+//Se inicializa el BMP280
+if (!bmp280_init(&bmp280, &parametro_bmp280)){
+	// Mensaje de error
+
+}
+
+
 
 /* USER CODE END 0 */
 
