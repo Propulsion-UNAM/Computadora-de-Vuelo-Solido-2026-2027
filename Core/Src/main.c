@@ -57,7 +57,9 @@ UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart6;
 
 /* USER CODE BEGIN PV */
-
+float temperatura=0.0f;
+float presion=0.0f; 
+float altura=0.0f;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -75,38 +77,27 @@ static void MX_USART1_UART_Init(void);
 static void MX_USART6_UART_Init(void);
 /* USER CODE BEGIN PFP */
 
+//-------------Aqui se pondran las funciones creadas--------------
+int __io_putchar(int ch){
+
+  //----UART para debugger -----
+  HAL_StatusTypeDef HAL_USART_Transmit(&huart1,(uint8_t *)&ch,1,0xFFFF);
+
+  return ch;
+
+}
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+//Creación de objetos para BMP280
 BMP280_HandleTypedef bmp280;
-
-
-/*Si queremos utilizar I2C
-bmp.comm_mode=BMP280_MODE_I2C;
-bmp.i2c=&hi2c1;
-bmp.addr=BMP280_I2C_ADDRESS_0;
- */
-
-//Si queremos utilizar SPI
-bmp.comm_mode=BMP280_MODE_SPI;
-bmp.spi=&hspi1;
-bmp.cs_port=GPIOA;
-bmp.cs_pin=GPIO_PIN_12;
-
 bmp280_params_t parametro_bmp280;
-bmp280_init_default_params(bmp280_params_t &parametro_bmp280);
-
-//----- Aqui va el cambio de parametros ----
 
 
 
 
-//Se inicializa el BMP280
-if (!bmp280_init(&bmp280, &parametro_bmp280)){
-	// Mensaje de error
-
-}
 
 
 
@@ -153,12 +144,53 @@ int main(void)
   MX_USART6_UART_Init();
   /* USER CODE BEGIN 2 */
 
+
+
+
+  //--------Inicialización del BMP280-------------
+
+  /*Si queremos utilizar I2C
+  bmp280.comm_mode=BMP280_MODE_I2C;
+  bmp280.i2c=&hi2c1;
+  bmp280.addr=BMP280_I2C_ADDRESS_0;
+   */
+
+  //Si queremos utilizar SPI
+  bmp280.comm_mode=BMP280_MODE_SPI;
+  bmp280.spi=&hspi1;
+  bmp280.cs_port=GPIOA;
+  bmp280.cs_pin=GPIO_PIN_12;
+
+  bmp280_init_default_params(&parametro_bmp280);
+
+  //----- Aqui va el cambio de parametros ----
+  parametro_bmp280.filter=BMP280_FILTER_4;
+  parametro_bmp280.oversampling_pressure=BMP280_HIGH_RES;
+  parametro_bmp280.oversampling_temperature=BMP280_HIGH_RES;
+  parametro_mp280.standby=BMP280_STANDBY_05;
+
+
+
+  //Se inicializa el BMP280
+  if (!bmp280_init(&bmp280, &parametro_bmp280)){
+  	// Mensaje de error
+    printf("No se dectecto y/o inicializo el BMP280");
+    Error_Handler();//Se mete interrupcion y se prende led 
+
+  
+  
+
+  }
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    while(!bmp280_read_float(&bmp280,&temperatura,&presion,NULL)){
+      printf("No se pudieron asignar valores .... BMP280");
+      Error_Handler();
+    }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -698,6 +730,7 @@ void Error_Handler(void)
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
   __disable_irq();
+  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_3, GPIO_PIN_SET);
   while (1)
   {
   }
