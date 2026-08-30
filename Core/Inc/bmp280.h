@@ -216,5 +216,5 @@ bool bmp280_read_fixed(BMP280_HandleTypedef *dev, int32_t *temperature,
 bool bmp280_read_float(BMP280_HandleTypedef *dev, float *temperature,
                        float *pressure, float *humidity);
 
-
+float CalcularAltura(float presion, float presion_base);
 #endif  // __BMP280_H__

@@ -57,9 +57,16 @@ UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart6;
 
 /* USER CODE BEGIN PV */
+
+//---lecturas bmp280---------
 float temperatura=0.0f;
 float presion=0.0f; 
 float altura=0.0f;
+
+//----Variables para calcular altitud --------
+float presion_nivel_mar=101325f;//Este valor esta en pascales 
+float altura_nivel_mar; //Es la altura en el suelo
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -174,13 +181,28 @@ int main(void)
   //Se inicializa el BMP280
   if (!bmp280_init(&bmp280, &parametro_bmp280)){
   	// Mensaje de error
-    printf("No se dectecto y/o inicializo el BMP280");
+    printf("No se dectecto y/o inicializo el BMP280\n");
     Error_Handler();//Se mete interrupcion y se prende led 
 
-  
-  
-
   }
+
+  //----------Se obtiene por primera vez los datos ----------
+  while(!bmp280_read_float(&bmp280,&temperatura,&presion,NULL)){
+    printf("No se pudieron asignar valores .... BMP280\n");
+    Error_Handler();
+    }
+  
+  //----- se calcula la altura con respecto a nivel del mar --------
+  altura_nivel_mar=CalcularAltura(float presion, float presion_nivel_mar);
+
+  //-------Condición de seguridad ----------
+  if(isnan(altura_nivel_mar)){
+    printf("No se pudo calcular la medida de altura inicial (nivel del mar)\n");
+    Error_Handler();
+  }
+
+  
+  
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -188,9 +210,19 @@ int main(void)
   while (1)
   {
     while(!bmp280_read_float(&bmp280,&temperatura,&presion,NULL)){
-      printf("No se pudieron asignar valores .... BMP280");
+      printf("No se pudieron asignar valores .... BMP280\n");
       Error_Handler();
     }
+
+    altura=CalcularAltura(float presion, float presion_nivel_mar)-altura_nivel_mar;
+
+    if(isnan(altura)){
+      printf("No se pudo calcular la medida de altura\n");
+      Error_Handler();
+   }
+
+    
+    //Aqui irá la lógica 
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */

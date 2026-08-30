@@ -27,7 +27,7 @@
  */
 
 #include "bmp280.h"
-
+#include <math.h>
 /**
  * BMP280 registers
  */
@@ -394,4 +394,11 @@ bool bmp280_read_float(BMP280_HandleTypedef *dev, float *temperature, float *pre
 	}
 
 	return false;
+}
+
+float CalcularAltura(float presion, float presion_nivel_mar){
+	if(presion!=0.0f){
+		return 44330.0f * (1.0f - powf(presion / presion_nivel_mar, 0.1903f));
+	}
+	return NAN;
 }
