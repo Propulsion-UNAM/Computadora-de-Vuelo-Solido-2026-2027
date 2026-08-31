@@ -21,7 +21,8 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "BMI270.h"
+#include "filter.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -52,6 +53,10 @@ I2C_HandleTypeDef hi2c2;
 SD_HandleTypeDef hsd;
 
 SPI_HandleTypeDef hspi1;
+DMA_HandleTypeDef hdma_spi1_rx;
+DMA_HandleTypeDef hdma_spi1_tx;
+
+TIM_HandleTypeDef htim2;
 
 UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart6;
@@ -63,6 +68,7 @@ UART_HandleTypeDef huart6;
 /* Private function prototypes -----------------------------------------------*/
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
+static void MX_DMA_Init(void);
 static void MX_ADC1_Init(void);
 static void MX_ADC2_Init(void);
 static void MX_CAN1_Init(void);
@@ -73,12 +79,36 @@ static void MX_SDIO_SD_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_USART6_UART_Init(void);
+static void MX_TIM2_Init(void);
 /* USER CODE BEGIN PFP */
 
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+
+//-----Datos para inicialización-------
+uint8_t Adress_bmi= 0;
+uint8_t Estado_inicializacion_bmi= 3;
+
+//-------------Creacion de objetos ----------
+BMI270_t bmi270;
+BiquadFilter filtro_giro;
+
+
+//---------Arreglo donde se guardaran los bytes para aceleracion y de giroscopio------------
+uint8_t buffer_datos_bmi[14] = {0};
+
+
+//-----------lecturas antes de filtrado ---------------
+float raw_gyro_x;
+float raw_gyro_y;
+float raw_gyro_z;
+
+//-------------Contador de lecturas ------------------
+contador_lecturas_imu++;
+
 
 /* USER CODE END 0 */
 
@@ -111,6 +141,7 @@ int main(void)
 
   /* Initialize all configured peripherals */
   MX_GPIO_Init();
+  MX_DMA_Init();
   MX_ADC1_Init();
   MX_ADC2_Init();
   MX_CAN1_Init();
@@ -121,7 +152,18 @@ int main(void)
   MX_SPI1_Init();
   MX_USART1_UART_Init();
   MX_USART6_UART_Init();
+  MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
+
+  //-----------Inicializar bmi270, configuracion y pines-------------- 
+  struct_init(&bmi270, &hspi1, GPIOB, GPIO_PIN_13);
+  deviceAddr = read_CHIP_ID(&bmi270);
+  statusAddr = BMI270_init(&bmi270);
+
+  //-------------Calibracion----------------------
+  BMI270_gyro_calibrate(&bmi270);
+  Biquad_Init(&filtro_giro);
+  HAL_TIM_Base_Start_IT(&htim2);
 
   /* USER CODE END 2 */
 
@@ -483,8 +525,8 @@ static void MX_SPI1_Init(void)
   hspi1.Init.Mode = SPI_MODE_MASTER;
   hspi1.Init.Direction = SPI_DIRECTION_2LINES;
   hspi1.Init.DataSize = SPI_DATASIZE_8BIT;
-  hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
-  hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
+  hspi1.Init.CLKPolarity = SPI_POLARITY_HIGH;
+  hspi1.Init.CLKPhase = SPI_PHASE_2EDGE;
   hspi1.Init.NSS = SPI_NSS_SOFT;
   hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
   hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
@@ -498,6 +540,51 @@ static void MX_SPI1_Init(void)
   /* USER CODE BEGIN SPI1_Init 2 */
 
   /* USER CODE END SPI1_Init 2 */
+
+}
+
+/**
+  * @brief TIM2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM2_Init(void)
+{
+
+  /* USER CODE BEGIN TIM2_Init 0 */
+
+  /* USER CODE END TIM2_Init 0 */
+
+  TIM_ClockConfigTypeDef sClockSourceConfig = {0};
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM2_Init 1 */
+
+  /* USER CODE END TIM2_Init 1 */
+  htim2.Instance = TIM2;
+  htim2.Init.Prescaler = 0;
+  htim2.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim2.Init.Period = 3199;
+  htim2.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim2.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sClockSourceConfig.ClockSource = TIM_CLOCKSOURCE_INTERNAL;
+  if (HAL_TIM_ConfigClockSource(&htim2, &sClockSourceConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim2, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM2_Init 2 */
+
+  /* USER CODE END TIM2_Init 2 */
 
 }
 
@@ -564,6 +651,25 @@ static void MX_USART6_UART_Init(void)
   /* USER CODE BEGIN USART6_Init 2 */
 
   /* USER CODE END USART6_Init 2 */
+
+}
+
+/**
+  * Enable DMA controller clock
+  */
+static void MX_DMA_Init(void)
+{
+
+  /* DMA controller clock enable */
+  __HAL_RCC_DMA2_CLK_ENABLE();
+
+  /* DMA interrupt init */
+  /* DMA2_Stream0_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA2_Stream0_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA2_Stream0_IRQn);
+  /* DMA2_Stream3_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA2_Stream3_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA2_Stream3_IRQn);
 
 }
 
@@ -656,6 +762,48 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+    if(htim->Instance == TIM2)
+    {
+        HAL_GPIO_WritePin(bmi270.cs_port, bmi270.cs_pin, GPIO_PIN_RESET);
+        HAL_SPI_TransmitReceive_DMA(bmi270.hspi, bmi270.spi_tx_buffer, bmi270.spi_rx_buffer, 14);
+    }
+}
+
+void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
+{
+    if(hspi->Instance == SPI1)
+    {
+        HAL_GPIO_WritePin(bmi270.cs_port, bmi270.cs_pin, GPIO_PIN_SET);
+
+        memcpy(buffer_datos_imu, (uint8_t*)bmi270.spi_rx_buffer, 14);
+
+        // --- ACELERACIÓN ---
+        bmi270.raw_acc_x = (int16_t)(((uint8_t)buffer_datos_imu[3] << 8) | (uint8_t)buffer_datos_imu[2]);
+        bmi270.raw_acc_y = (int16_t)(((uint8_t)buffer_datos_imu[5] << 8) | (uint8_t)buffer_datos_imu[4]);
+        bmi270.raw_acc_z = (int16_t)(((uint8_t)buffer_datos_imu[7] << 8) | (uint8_t)buffer_datos_imu[6]);
+
+        bmi270.acc_x = ((float)bmi270.raw_acc_x / 2048.0f) * 9.80665f;
+        bmi270.acc_y = ((float)bmi270.raw_acc_y / 2048.0f) * 9.80665f;
+        bmi270.acc_z = ((float)bmi270.raw_acc_z / 2048.0f) * 9.80665f;
+
+        // --- GIROSCOPIO ---
+        bmi270.raw_x = (int16_t)(((uint8_t)buffer_datos_imu[9] << 8) | (uint8_t)buffer_datos_imu[8]);
+        bmi270.raw_y = (int16_t)(((uint8_t)buffer_datos_imu[11] << 8) | (uint8_t)buffer_datos_imu[10]);
+        bmi270.raw_z = (int16_t)(((uint8_t)buffer_datos_imu[13] << 8) | (uint8_t)buffer_datos_imu[12]);
+
+        giroscopio_x_grados = ((float)bmi270.raw_x / 16.4f) - bmi270.offset_x;
+        giroscopio_y_grados = ((float)bmi270.raw_y / 16.4f) - bmi270.offset_y;
+        giroscopio_z_grados = ((float)bmi270.raw_z / 16.4f) - bmi270.offset_z;
+        
+        bmi270.gyro_x = Biquad_Update(giroscopio_x_grados, &filtro_giroscopio.x1_x, &filtro_giroscopio.x2_x, &filtro_giroscopio.y1_x, &filtro_giroscopio.y2_x, &filtro_giroscopio);
+        bmi270.gyro_y = Biquad_Update(giroscopio_y_grados, &filtro_giroscopio.x1_y, &filtro_giroscopio.x2_y, &filtro_giroscopio.y1_y, &filtro_giroscopio.y2_y, &filtro_giroscopio);
+        bmi270.gyro_z = Biquad_Update(giroscopio_z_grados, &filtro_giroscopio.x1_z, &filtro_giroscopio.x2_z, &filtro_giroscopio.y1_z, &filtro_giroscopio.y2_z, &filtro_giroscopio);
+
+        contador_lecturas_imu++;
+    }
+}
 
 /* USER CODE END 4 */
 
