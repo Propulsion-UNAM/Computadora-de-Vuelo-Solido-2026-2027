@@ -21,7 +21,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "mpu6050.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -58,6 +58,13 @@ UART_HandleTypeDef huart6;
 
 /* USER CODE BEGIN PV */
 
+//-----------Variables de aceleración-----------------
+
+float acc_x=0.0f;
+float acc_y=0.0f;
+float acc_z=0.0f;
+
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -75,10 +82,25 @@ static void MX_USART1_UART_Init(void);
 static void MX_USART6_UART_Init(void);
 /* USER CODE BEGIN PFP */
 
+//-------------Aqui se pondran las funciones creadas--------------
+
+//--------------------función para debugger por USART ----------------------
+int __io_putchar(int ch){
+  //----UART para debugger -----
+  HAL_UART_Transmit(&huart1, (uint8_t *)&ch, 1, 0xFFFF);
+  return ch;
+}
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
+
+
+//----------------Crear objeto MPU6050 -------------------------------
+MPU6050_t mpu6050;
+
+
 
 /* USER CODE END 0 */
 
@@ -90,6 +112,14 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
+  
+  //---------------Inicializar los registros de MPU6050 y calibración de giroscopio -------------------------
+  	if(MPU6050_Init(&hi2c1) !=HAL_OK){
+      printf("No se dectectó el MPU6050");
+      Error_Handler();
+    }
+    MPU6050_CalibrateGyro(&hi2c1, &mpu6050);
+
 
   /* USER CODE END 1 */
 
@@ -129,6 +159,15 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    //-----------Aceleración---------------
+    MPU6050_ReadAccel(&hi2c1, &mpu6050);    
+    MPU6050_ReadGyro(&hi2c1, &mpu6050);
+
+    acc_x=(float)mpu6050.acc_raw[0]/2048.0f;
+    acc_y=(float)mpu6050.acc_raw[1]/2048.0f;
+    acc_z=(float)mpu6050.acc_raw[2]/2048.0f;
+    
+    
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
