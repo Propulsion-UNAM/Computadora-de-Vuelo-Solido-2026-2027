@@ -18,6 +18,9 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "fatfs.h"
+#include "stm32f4xx_hal_sd.h"
+#include "stm32f4xx_ll_sdmmc.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -58,6 +61,12 @@ UART_HandleTypeDef huart6;
 
 /* USER CODE BEGIN PV */
 
+//-----------------Variables para la creación de archivo con nombre e indice -------------------
+char nombre_archivo[20];
+FIL Archivo;
+FRESULT res;
+FILINFO info;           
+int indice = 1;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -75,6 +84,46 @@ static void MX_USART1_UART_Init(void);
 static void MX_USART6_UART_Init(void);
 /* USER CODE BEGIN PFP */
 
+//----------------------funcíon para imprimir-------------------
+int __io_putchar(int ch) {
+  HAL_UART_Transmit(&huart1, (uint8_t *)&ch, 1, 0xFFFF);
+  return ch;
+}
+
+//---------------------dectectar SD------------------------------
+uint8_t BSP_SD_IsDetected(void)
+{
+  uint8_t Status=SD_PRESENT;
+  return Status;
+
+}
+
+//--------------------Función para guardar datos----------------------------
+void Guardar_Datos_SD(uint32_t tiempo, float alt, float pres, float temp, 
+                      float gx, float gy, float gz, 
+                      float ax, float ay, float az, 
+                      float mx, float my, float mz) {
+    
+    char buffer[150];
+    UINT bytesGuardados;
+    
+    static uint8_t lecturas_guardado=0; 
+    
+    sprintf(buffer, "%lu,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n", 
+            tiempo, alt, pres, temp, gx, gy, gz, ax, ay, az, mx, my, mz);
+            
+    f_write(&Archivo, buffer, strlen(buffer), &bytesGuardados);
+    
+    // -----------------Incrementar el contador de lecturas-------------------
+    lecturas_guardado++;
+    
+    //-----------------Forzar el guardado cada 50 lecturas---------------- 
+    if (lecturas_guardado>= 50) {
+        f_sync(&Archivo);
+        lecturas_guardado= 0;
+    }
+}
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -87,8 +136,7 @@ static void MX_USART6_UART_Init(void);
   * @retval int
   */
 int main(void)
-{
-
+{ 
   /* USER CODE BEGIN 1 */
 
   /* USER CODE END 1 */
@@ -121,7 +169,47 @@ int main(void)
   MX_SPI1_Init();
   MX_USART1_UART_Init();
   MX_USART6_UART_Init();
+  MX_FATFS_Init();
   /* USER CODE BEGIN 2 */
+
+
+printf("SD card information\n");
+printf("Block size :%lu\n", hsd.SdCard.BlockSize);
+printf("Block nmbr :%lu\n", hsd.SdCard.BlockNbr);
+printf("Card size :%lu\n", (hsd.SdCard.BlockSize + hsd.SdCard.BlockNbr)/100);
+printf("Card Version :%lu\n", hsd.SdCard.CardVersion);
+
+if(f_mount(&SDFatFS, (TCHAR const*) SDPath,0)!= FR_OK){
+  printf("Unable to mount disk\n");
+  Error_Handler();
+}
+
+//----------------------Genera el nombre y lo guarda en nombreArchivo-------------------------
+ while (1) {
+    sprintf(nombre_archivo,"vuelo_%d.csv",indice);
+    
+    //revisa si existe y si si le agrega uno al indice
+    res = f_stat(nombre_archivo, &info); 
+    if (res == FR_NO_FILE) {
+        break; 
+    }
+    indice++;
+  }
+
+  //----------------------Creación de archivo con encabezado ----------------------------------
+  res = f_open(&Archivo, nombre_archivo, FA_CREATE_ALWAYS | FA_WRITE);
+
+  if (res == FR_OK) {
+    printf("Archivo %s creado exitosamente\r\n", nombre_archivo);
+    
+    char header[] = "Tiempo,Altura,Presión,Temperatura,GiroX,GiroY,GiroZ,AcelX,AcelY,AcelZ,MagX,MagY,MagZ\n";
+    UINT bytesheader;
+    f_write(&Archivo, header, strlen(header), &bytesheader);
+
+  } else {
+    printf("Error al crear %s\r\n", nombre_archivo);
+  }
+
 
   /* USER CODE END 2 */
 
@@ -449,15 +537,16 @@ static void MX_SDIO_SD_Init(void)
   hsd.Init.BusWide = SDIO_BUS_WIDE_1B;
   hsd.Init.HardwareFlowControl = SDIO_HARDWARE_FLOW_CONTROL_DISABLE;
   hsd.Init.ClockDiv = 0;
-  if (HAL_SD_Init(&hsd) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_SD_ConfigWideBusOperation(&hsd, SDIO_BUS_WIDE_4B) != HAL_OK)
-  {
-    Error_Handler();
-  }
   /* USER CODE BEGIN SDIO_Init 2 */
+
+  hsd.Init.BusWide = SDIO_BUS_WIDE_1B;
+  if(HAL_SD_Init(&hsd)!= HAL_OK){
+    Error_Handler();
+  }
+
+  if(HAL_SD_ConfigWideBusOperation(&hsd,SDIO_BUS_WIDE_4B)!= HAL_OK){
+    Error_Handler();
+  }
 
   /* USER CODE END SDIO_Init 2 */
 
@@ -634,7 +723,7 @@ static void MX_GPIO_Init(void)
   /*Configure GPIO pin : PA8 */
   GPIO_InitStruct.Pin = GPIO_PIN_8;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
-  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Pull = GPIO_PULLDOWN;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
   /*Configure GPIO pin : PB7 */
