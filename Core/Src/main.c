@@ -21,6 +21,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "HMC5883L.h"
 
 /* USER CODE END Includes */
 
@@ -31,7 +32,9 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-
+#define OFFSET_X 0
+#define OFFSET_Y 0
+#define OFFSET_Z 0
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -58,6 +61,9 @@ UART_HandleTypeDef huart6;
 
 /* USER CODE BEGIN PV */
 
+
+//----------------------Se crea el vector de variables magnetometro --------------------
+Vector magnetometro;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -75,6 +81,16 @@ static void MX_USART1_UART_Init(void);
 static void MX_USART6_UART_Init(void);
 /* USER CODE BEGIN PFP */
 
+//-------------Aqui se pondran las funciones creadas--------------
+
+//--------------------función para debugger por USART ----------------------
+int __io_putchar(int ch){
+  //----UART para debugger -----
+  HAL_UART_Transmit(&huart1, (uint8_t *)&ch, 1, 0xFFFF);
+  return ch;
+}
+
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -90,6 +106,11 @@ int main(void)
 {
 
   /* USER CODE BEGIN 1 */
+  HMC5883L_setOffset(OFFSET_X,OFFSET_Y,OFFSET_Z);
+  HMC5883L_setRange(HMC5883L_RANGE_1_3GA);
+  HMC5883L_setMeasurementMode(HMC5883L_CONTINOUS);
+  HMC5883L_setDataRate(HMC5883L_DATARATE_75HZ );
+  HMC5883L_setSamples(HMC5883L_SAMPLES_8);
 
   /* USER CODE END 1 */
 
@@ -129,6 +150,10 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+    //---------------Lectura de datos magnetometro por estructura -----------------
+    magnetometro=HMC5883L_readNormalize();
+    printf("mx:%.2f ",magnetometro.XAxis,"my:%.2f ",magnetometro.YAxis,"mz:%.2f\n",magnetometro.ZAxis);
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
