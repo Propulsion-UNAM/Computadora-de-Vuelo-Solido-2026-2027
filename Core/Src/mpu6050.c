@@ -13,7 +13,7 @@ HAL_StatusTypeDef MPU6050_Init(I2C_HandleTypeDef *hi2c)
 
     //------- Se añadió para inicializar el filtro interno en 20 HZ ------------
     data = 0x04;
-    if (HAL_I2C_Mem_Write(hi2c, MPU6050_ADDR, MPU6050_REG_FILTER_1, 1, &data, 1, HAL_MAX_DELAY) != HAL_OK)
+    if (HAL_I2C_Mem_Write(hi2c, MPU6050_ADDR, MPU6050_REG_FILTER, 1, &data, 1, HAL_MAX_DELAY) != HAL_OK)
         return HAL_ERROR;
 
 
