@@ -50,8 +50,6 @@ CAN_HandleTypeDef hcan2;
 I2C_HandleTypeDef hi2c1;
 I2C_HandleTypeDef hi2c2;
 
-SD_HandleTypeDef hsd;
-
 SPI_HandleTypeDef hspi1;
 DMA_HandleTypeDef hdma_spi1_rx;
 DMA_HandleTypeDef hdma_spi1_tx;
@@ -75,7 +73,6 @@ static void MX_CAN1_Init(void);
 static void MX_CAN2_Init(void);
 static void MX_I2C1_Init(void);
 static void MX_I2C2_Init(void);
-static void MX_SDIO_SD_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_USART6_UART_Init(void);
@@ -105,9 +102,22 @@ uint8_t buffer_datos_bmi[14] = {0};
 float raw_gyro_x;
 float raw_gyro_y;
 float raw_gyro_z;
+volatile int16_t ax_raw = 0;
+volatile int16_t ay_raw = 0;
+volatile int16_t az_raw = 0;
 
+volatile int16_t gx_raw = 0;
+volatile int16_t gy_raw = 0;
+volatile int16_t gz_raw = 0;
+
+volatile float ax_g = 0;
+volatile float ay_g = 0;
+volatile float az_g = 0;
+
+uint8_t tx_bmi[14] = {0};
+uint8_t rx_bmi[14] = {0};
 //-------------Contador de lecturas ------------------
-contador_lecturas_imu++;
+int contador_lecturas_imu;
 
 
 /* USER CODE END 0 */
@@ -148,29 +158,60 @@ int main(void)
   MX_CAN2_Init();
   MX_I2C1_Init();
   MX_I2C2_Init();
-  MX_SDIO_SD_Init();
   MX_SPI1_Init();
   MX_USART1_UART_Init();
   MX_USART6_UART_Init();
   MX_TIM2_Init();
   /* USER CODE BEGIN 2 */
-
-  //-----------Inicializar bmi270, configuracion y pines-------------- 
   struct_init(&bmi270, &hspi1, GPIOB, GPIO_PIN_13);
-  deviceAddr = read_CHIP_ID(&bmi270);
-  statusAddr = BMI270_init(&bmi270);
 
-  //-------------Calibracion----------------------
-  BMI270_gyro_calibrate(&bmi270);
-  Biquad_Init(&filtro_giro);
-  HAL_TIM_Base_Start_IT(&htim2);
+  /* CS en reposo */
+  HAL_GPIO_WritePin(bmi270.cs_port, bmi270.cs_pin, GPIO_PIN_SET);
+  HAL_Delay(10);
 
+  /* Fuerza selección de interfaz SPI */
+  SPI_init(&bmi270);
+  HAL_Delay(10);
+
+  /* Leer CHIP_ID */
+  Adress_bmi = read_CHIP_ID(&bmi270);
+
+  Estado_inicializacion_bmi = BMI270_init(&bmi270);
+  uint8_t enable_tx[2] = {0x7D, 0x06};
+  SPI_Transmit(enable_tx, 2, 100, &bmi270);
+  HAL_Delay(10);
+
+
+  tx_bmi[0] = 0x0C | 0x80;
+
+  for (int i = 1; i < 14; i++)
+  {
+      tx_bmi[i] = 0xFF;
+  }
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+	  SPI_Recive(tx_bmi, rx_bmi, 14, 100, &bmi270);
+
+	      // Acelerómetro
+	      ax_raw = (int16_t)((rx_bmi[3] << 8) | rx_bmi[2]);
+	      ay_raw = (int16_t)((rx_bmi[5] << 8) | rx_bmi[4]);
+	      az_raw = (int16_t)((rx_bmi[7] << 8) | rx_bmi[6]);
+
+	      // Giroscopio
+	      gx_raw = (int16_t)((rx_bmi[9]  << 8) | rx_bmi[8]);
+	      gy_raw = (int16_t)((rx_bmi[11] << 8) | rx_bmi[10]);
+	      gz_raw = (int16_t)((rx_bmi[13] << 8) | rx_bmi[12]);
+
+	      // Si configuraste ±16 g
+	      ax_g = (float)ax_raw / 2048.0f;
+	      ay_g = (float)ay_raw / 2048.0f;
+	      az_g = (float)az_raw / 2048.0f;
+
+	      HAL_Delay(100);
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -197,12 +238,7 @@ void SystemClock_Config(void)
   */
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
-  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
-  RCC_OscInitStruct.PLL.PLLM = 8;
-  RCC_OscInitStruct.PLL.PLLN = 168;
-  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
-  RCC_OscInitStruct.PLL.PLLQ = 7;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_NONE;
   if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
   {
     Error_Handler();
@@ -212,12 +248,12 @@ void SystemClock_Config(void)
   */
   RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
                               |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
-  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
+  RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_HSE;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV4;
   RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV2;
 
-  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_5) != HAL_OK)
+  if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK)
   {
     Error_Handler();
   }
@@ -470,42 +506,6 @@ static void MX_I2C2_Init(void)
 }
 
 /**
-  * @brief SDIO Initialization Function
-  * @param None
-  * @retval None
-  */
-static void MX_SDIO_SD_Init(void)
-{
-
-  /* USER CODE BEGIN SDIO_Init 0 */
-
-  /* USER CODE END SDIO_Init 0 */
-
-  /* USER CODE BEGIN SDIO_Init 1 */
-
-  /* USER CODE END SDIO_Init 1 */
-  hsd.Instance = SDIO;
-  hsd.Init.ClockEdge = SDIO_CLOCK_EDGE_RISING;
-  hsd.Init.ClockBypass = SDIO_CLOCK_BYPASS_DISABLE;
-  hsd.Init.ClockPowerSave = SDIO_CLOCK_POWER_SAVE_DISABLE;
-  hsd.Init.BusWide = SDIO_BUS_WIDE_1B;
-  hsd.Init.HardwareFlowControl = SDIO_HARDWARE_FLOW_CONTROL_DISABLE;
-  hsd.Init.ClockDiv = 0;
-  if (HAL_SD_Init(&hsd) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  if (HAL_SD_ConfigWideBusOperation(&hsd, SDIO_BUS_WIDE_4B) != HAL_OK)
-  {
-    Error_Handler();
-  }
-  /* USER CODE BEGIN SDIO_Init 2 */
-
-  /* USER CODE END SDIO_Init 2 */
-
-}
-
-/**
   * @brief SPI1 Initialization Function
   * @param None
   * @retval None
@@ -690,7 +690,6 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOH_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
-  __HAL_RCC_GPIOD_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13|GPIO_PIN_3, GPIO_PIN_RESET);
@@ -777,29 +776,31 @@ void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
     {
         HAL_GPIO_WritePin(bmi270.cs_port, bmi270.cs_pin, GPIO_PIN_SET);
 
-        memcpy(buffer_datos_imu, (uint8_t*)bmi270.spi_rx_buffer, 14);
+        memcpy(buffer_datos_bmi,
+               (uint8_t*)bmi270.spi_rx_buffer,
+               14);
 
         // --- ACELERACIÓN ---
-        bmi270.raw_acc_x = (int16_t)(((uint8_t)buffer_datos_imu[3] << 8) | (uint8_t)buffer_datos_imu[2]);
-        bmi270.raw_acc_y = (int16_t)(((uint8_t)buffer_datos_imu[5] << 8) | (uint8_t)buffer_datos_imu[4]);
-        bmi270.raw_acc_z = (int16_t)(((uint8_t)buffer_datos_imu[7] << 8) | (uint8_t)buffer_datos_imu[6]);
+        bmi270.raw_acc_x = (int16_t)(((uint8_t)buffer_datos_bmi[3] << 8) | (uint8_t)buffer_datos_bmi[2]);
+        bmi270.raw_acc_y = (int16_t)(((uint8_t)buffer_datos_bmi[5] << 8) | (uint8_t)buffer_datos_bmi[4]);
+        bmi270.raw_acc_z = (int16_t)(((uint8_t)buffer_datos_bmi[7] << 8) | (uint8_t)buffer_datos_bmi[6]);
 
         bmi270.acc_x = ((float)bmi270.raw_acc_x / 2048.0f) * 9.80665f;
         bmi270.acc_y = ((float)bmi270.raw_acc_y / 2048.0f) * 9.80665f;
         bmi270.acc_z = ((float)bmi270.raw_acc_z / 2048.0f) * 9.80665f;
 
         // --- GIROSCOPIO ---
-        bmi270.raw_x = (int16_t)(((uint8_t)buffer_datos_imu[9] << 8) | (uint8_t)buffer_datos_imu[8]);
-        bmi270.raw_y = (int16_t)(((uint8_t)buffer_datos_imu[11] << 8) | (uint8_t)buffer_datos_imu[10]);
-        bmi270.raw_z = (int16_t)(((uint8_t)buffer_datos_imu[13] << 8) | (uint8_t)buffer_datos_imu[12]);
+        bmi270.raw_x = (int16_t)(((uint8_t)buffer_datos_bmi[9] << 8) | (uint8_t)buffer_datos_bmi[8]);
+        bmi270.raw_y = (int16_t)(((uint8_t)buffer_datos_bmi[11] << 8) | (uint8_t)buffer_datos_bmi[10]);
+        bmi270.raw_z = (int16_t)(((uint8_t)buffer_datos_bmi[13] << 8) | (uint8_t)buffer_datos_bmi[12]);
 
-        giroscopio_x_grados = ((float)bmi270.raw_x / 16.4f) - bmi270.offset_x;
-        giroscopio_y_grados = ((float)bmi270.raw_y / 16.4f) - bmi270.offset_y;
-        giroscopio_z_grados = ((float)bmi270.raw_z / 16.4f) - bmi270.offset_z;
+        raw_gyro_x = ((float)bmi270.raw_x / 16.4f) - bmi270.offset_x;
+        raw_gyro_y = ((float)bmi270.raw_y / 16.4f) - bmi270.offset_y;
+        raw_gyro_z = ((float)bmi270.raw_z / 16.4f) - bmi270.offset_z;
         
-        bmi270.gyro_x = Biquad_Update(giroscopio_x_grados, &filtro_giroscopio.x1_x, &filtro_giroscopio.x2_x, &filtro_giroscopio.y1_x, &filtro_giroscopio.y2_x, &filtro_giroscopio);
-        bmi270.gyro_y = Biquad_Update(giroscopio_y_grados, &filtro_giroscopio.x1_y, &filtro_giroscopio.x2_y, &filtro_giroscopio.y1_y, &filtro_giroscopio.y2_y, &filtro_giroscopio);
-        bmi270.gyro_z = Biquad_Update(giroscopio_z_grados, &filtro_giroscopio.x1_z, &filtro_giroscopio.x2_z, &filtro_giroscopio.y1_z, &filtro_giroscopio.y2_z, &filtro_giroscopio);
+        bmi270.gyro_x = Biquad_Update(raw_gyro_x, &filtro_giro.x1_x, &filtro_giro.x2_x, &filtro_giro.y1_x, &filtro_giro.y2_x, &filtro_giro);
+        bmi270.gyro_y = Biquad_Update(raw_gyro_y, &filtro_giro.x1_y, &filtro_giro.x2_y, &filtro_giro.y1_y, &filtro_giro.y2_y, &filtro_giro);
+        bmi270.gyro_z = Biquad_Update(raw_gyro_z, &filtro_giro.x1_z, &filtro_giro.x2_z, &filtro_giro.y1_z, &filtro_giro.y2_z, &filtro_giro);
 
         contador_lecturas_imu++;
     }

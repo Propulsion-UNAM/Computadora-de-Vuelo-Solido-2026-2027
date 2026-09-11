@@ -441,42 +441,46 @@ const uint8_t bmi270_config_file[] = {
     0x00, 0xc1, 0x80, 0x2e, 0x00, 0xc1, 0x80, 0x2e, 0x00, 0xc1, 0x80, 0x2e, 0x00, 0xc1, 0x80, 0x2e, 0x00, 0xc1, 0x80,
     0x2e, 0x00, 0xc1
 };
-void struct_init(BMI270_t *bmi270,HAL_SPI_StateTypeDef *hspi,GPIO_TypeDef *cs_port,uint16_t cs_pin)
+void struct_init(BMI270_t *bmi270,
+                 SPI_HandleTypeDef *hspi,
+                 GPIO_TypeDef *cs_port,
+                 uint16_t cs_pin)
 {
-	bmi270->hspi = hspi;
-	bmi270->cs_port = cs_port;
-	bmi270->cs_pin = cs_pin;
+    bmi270->hspi = hspi;
+    bmi270->cs_port = cs_port;
+    bmi270->cs_pin = cs_pin;
 
-	bmi270->gyro_x = 0;
-	bmi270->gyro_y = 0;
-	bmi270->gyro_z = 0;
+    bmi270->gyro_x = 0;
+    bmi270->gyro_y = 0;
+    bmi270->gyro_z = 0;
 
-	bmi270->offset_x = 0;
-	bmi270->offset_y = 0;
-	bmi270->offset_z = 0;
+    bmi270->offset_x = 0;
+    bmi270->offset_y = 0;
+    bmi270->offset_z = 0;
 
-	bmi270->prev_gyro_x = 0;
-	bmi270->prev_gyro_y = 0;
-	bmi270->prev_gyro_z = 0;
+    bmi270->prev_gyro_x = 0;
+    bmi270->prev_gyro_y = 0;
+    bmi270->prev_gyro_z = 0;
 
-	bmi270->raw_x = 0;
-	bmi270->raw_y = 0;
-	bmi270->raw_z = 0;
+    bmi270->raw_x = 0;
+    bmi270->raw_y = 0;
+    bmi270->raw_z = 0;
 
-    bmi270->raw_acc_x=0;
-    bmi270->raw_acc_y=0;
-    bmi270->raw_acc_z=0;
+    bmi270->raw_acc_x = 0;
+    bmi270->raw_acc_y = 0;
+    bmi270->raw_acc_z = 0;
 
-    bmi270->acc_x=0;
-    bmi270->acc_y=0;
-    bmi270->acc_z=0;
+    bmi270->acc_x = 0;
+    bmi270->acc_y = 0;
+    bmi270->acc_z = 0;
 
-	for(uint8_t i = 0; i<14;i++)
-	{
-		bmi270->spi_rx_buffer[i] = 0;
-		bmi270->spi_tx_buffer[i] = 0;
-	}
-	bmi270->spi_tx_buffer[0] = 0x0C | 0x80;
+    for (uint8_t i = 0; i < 14; i++)
+    {
+        bmi270->spi_rx_buffer[i] = 0;
+        bmi270->spi_tx_buffer[i] = 0;
+    }
+
+    bmi270->spi_tx_buffer[0] = 0x0C | 0x80;
 }
 
 void SPI_init(BMI270_t *bmi270)
@@ -575,9 +579,17 @@ uint8_t BMI270_init(BMI270_t *bmi270)
 
 		//Soft Reset
 		uint8_t txData[2];
+
+		SPI_init(bmi270);
+		HAL_Delay(1);
+
+
+
 		txData[0] = 0x7E;
 		txData[1] = 0xb6;
-		SPI_Transmit(txData, 2, 100,bmi270);
+
+		if(!SPI_Transmit(txData, 2, 100,bmi270))
+			return 0;
 		HAL_Delay(20);
 
 		//For awake SPI
@@ -586,18 +598,21 @@ uint8_t BMI270_init(BMI270_t *bmi270)
 		//Advanced Power Save OFF
 		txData[0] = 0x7C;
 		txData[1] = 0x00;
-		SPI_Transmit(txData, 2, 100,bmi270);
+		if(!SPI_Transmit(txData, 2, 100,bmi270))
+			return 0;
 		HAL_Delay(1);
 
 		//Be ready for upload
 		txData[0] = 0x59;
 		txData[1] = 0x00;
-		SPI_Transmit(txData, 2, 100,bmi270);
+		if(!SPI_Transmit(txData, 2, 100,bmi270))
+			return 0;
 		HAL_Delay(1);
 
 		//Init index set
 		uint8_t indexset[3] = {0x5B,0x00,0x00};
-		SPI_Transmit(indexset, 3, 100,bmi270);
+		if(!SPI_Transmit(indexset, 3, 100,bmi270))
+			return 0;
 		HAL_Delay(2);
 
 		//Burst Write

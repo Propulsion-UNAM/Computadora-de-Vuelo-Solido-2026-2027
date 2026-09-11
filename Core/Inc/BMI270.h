@@ -65,7 +65,7 @@ typedef struct
 
 
 
-void struct_init(BMI270_t *bmi270,HAL_SPI_StateTypeDef *hspi,GPIO_TypeDef *cs_port,uint16_t cs_pin);
+void struct_init(BMI270_t *bmi270,SPI_HandleTypeDef *hspi,GPIO_TypeDef *cs_port,uint16_t cs_pin);
 bool SPI_Transmit(uint8_t *pdata,uint8_t size,uint32_t timeout,BMI270_t *bmi270);
 bool SPI_Recive(uint8_t *txdata,uint8_t*rxdata,uint8_t size,uint32_t timeout,BMI270_t *bmi270);
 uint8_t BMI270_init(BMI270_t *bmi270);
