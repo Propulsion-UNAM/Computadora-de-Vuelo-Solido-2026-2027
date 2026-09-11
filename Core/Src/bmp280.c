@@ -175,7 +175,7 @@ static bool read_hum_calibration_data(BMP280_HandleTypedef *dev) {
 	return false;
 }
 
-static int write_register8(BMP280_HandleTypedef *dev, uint8_t addr, uint8_t value) {
+/*static int write_register8(BMP280_HandleTypedef *dev, uint8_t addr, uint8_t value) {
 	uint16_t tx_buff;
 
 	tx_buff = (dev->addr << 1);
@@ -184,7 +184,8 @@ static int write_register8(BMP280_HandleTypedef *dev, uint8_t addr, uint8_t valu
 		return false;
 	else
 		return true;
-}
+}*/
+
 
 bool bmp280_init(BMP280_HandleTypedef *dev, bmp280_params_t *params) {
 
