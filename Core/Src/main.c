@@ -31,7 +31,11 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define I2C_RECOV_SCL_PORT  GPIOB
+#define I2C_RECOV_SCL_PIN   GPIO_PIN_8
 
+#define I2C_RECOV_SDA_PORT  GPIOB
+#define I2C_RECOV_SDA_PIN   GPIO_PIN_9
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -78,7 +82,7 @@ static void MX_SPI1_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_USART6_UART_Init(void);
 /* USER CODE BEGIN PFP */
-
+void i2c_recover_bus(I2C_HandleTypeDef *hi2c);
 //-------------Aqui se pondran las funciones creadas--------------
 
 //--------------------función para debugger por USART ----------------------
@@ -96,6 +100,7 @@ int __io_putchar(int ch){
 
 //----------------Crear objeto MPU6050 -------------------------------
 MPU6050_t mpu6050;
+
 
 
 
@@ -144,9 +149,10 @@ int main(void)
   MX_USART6_UART_Init();
   /* USER CODE BEGIN 2 */
   //---------------Inicializar los registros de MPU6050 y calibración de giroscopio -------------------------
-  	if(MPU6050_Init(&hi2c1) !=HAL_OK){
+  	while((MPU6050_Init(&hi2c1) !=HAL_OK)){
       printf("No se dectectó el MPU6050");
-      Error_Handler();
+      i2c_recover_bus(&hi2c1);
+      //Error_Handler();
     }
     MPU6050_CalibrateGyro(&hi2c1, &mpu6050);
 
@@ -651,7 +657,100 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+void i2c_recover_bus(I2C_HandleTypeDef *hi2c)
+{
+    GPIO_InitTypeDef gpio = {0};
 
+    /* 1. Desactivar I2C */
+    HAL_I2C_DeInit(hi2c);
+
+    /* 2. Habilitar reloj del GPIO */
+    __HAL_RCC_GPIOB_CLK_ENABLE();
+
+    /* 3. SCL y SDA como GPIO Open Drain */
+    gpio.Mode  = GPIO_MODE_OUTPUT_OD;
+    gpio.Pull  = GPIO_NOPULL;
+    gpio.Speed = GPIO_SPEED_FREQ_LOW;
+
+    gpio.Pin = I2C_RECOV_SCL_PIN;
+    HAL_GPIO_Init(I2C_RECOV_SCL_PORT, &gpio);
+
+    gpio.Pin = I2C_RECOV_SDA_PIN;
+    HAL_GPIO_Init(I2C_RECOV_SDA_PORT, &gpio);
+
+    /* Liberar bus */
+    HAL_GPIO_WritePin(I2C_RECOV_SCL_PORT,
+                      I2C_RECOV_SCL_PIN,
+                      GPIO_PIN_SET);
+
+    HAL_GPIO_WritePin(I2C_RECOV_SDA_PORT,
+                      I2C_RECOV_SDA_PIN,
+                      GPIO_PIN_SET);
+
+    HAL_Delay(1);
+
+    /* 4. Hasta 9 pulsos de SCL */
+    for (int i = 0; i < 9; i++)
+    {
+        /* Si SDA ya está libre, terminar */
+        if (HAL_GPIO_ReadPin(I2C_RECOV_SDA_PORT,
+                             I2C_RECOV_SDA_PIN) == GPIO_PIN_SET)
+        {
+            break;
+        }
+
+        /* SCL LOW */
+        HAL_GPIO_WritePin(I2C_RECOV_SCL_PORT,
+                          I2C_RECOV_SCL_PIN,
+                          GPIO_PIN_RESET);
+
+        HAL_Delay(1);
+
+        /* SCL HIGH */
+        HAL_GPIO_WritePin(I2C_RECOV_SCL_PORT,
+                          I2C_RECOV_SCL_PIN,
+                          GPIO_PIN_SET);
+
+        HAL_Delay(1);
+    }
+
+    /* 5. Generar STOP:
+       SDA LOW -> SCL HIGH -> SDA HIGH
+    */
+
+    HAL_GPIO_WritePin(I2C_RECOV_SDA_PORT,
+                      I2C_RECOV_SDA_PIN,
+                      GPIO_PIN_RESET);
+
+    HAL_Delay(1);
+
+    HAL_GPIO_WritePin(I2C_RECOV_SCL_PORT,
+                      I2C_RECOV_SCL_PIN,
+                      GPIO_PIN_SET);
+
+    HAL_Delay(1);
+
+    HAL_GPIO_WritePin(I2C_RECOV_SDA_PORT,
+                      I2C_RECOV_SDA_PIN,
+                      GPIO_PIN_SET);
+
+    HAL_Delay(1);
+
+    /* 6. Regresar pines a Alternate Function I2C */
+    gpio.Mode      = GPIO_MODE_AF_OD;
+    gpio.Pull      = GPIO_NOPULL;
+    gpio.Speed     = GPIO_SPEED_FREQ_VERY_HIGH;
+    gpio.Alternate = GPIO_AF4_I2C1;
+
+    gpio.Pin = I2C_RECOV_SCL_PIN;
+    HAL_GPIO_Init(I2C_RECOV_SCL_PORT, &gpio);
+
+    gpio.Pin = I2C_RECOV_SDA_PIN;
+    HAL_GPIO_Init(I2C_RECOV_SDA_PORT, &gpio);
+
+    /* 7. Reiniciar periférico I2C */
+    HAL_I2C_Init(hi2c);
+}
 /* USER CODE END 4 */
 
 /**
