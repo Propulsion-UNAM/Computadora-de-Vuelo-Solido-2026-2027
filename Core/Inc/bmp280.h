@@ -138,7 +138,7 @@ typedef struct {
     int16_t  dig_P7;
     int16_t  dig_P8;
     int16_t  dig_P9;
-
+*/
     /* Humidity compensation for BME280 */
 /*    uint8_t  dig_H1;
     int16_t  dig_H2;
@@ -153,7 +153,7 @@ typedef struct {
 
     bmp280_params_t params;
 
-    uint8_t  id;        /* Chip ID */
+    uint8_t  id;   */     /* Chip ID */
 /*
 } BMP280_HandleTypedef;
 */

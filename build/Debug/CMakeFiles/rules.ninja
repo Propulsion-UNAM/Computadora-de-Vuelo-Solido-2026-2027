@@ -62,7 +62,7 @@ rule C_COMPILER__STM32_Drivers_unscanned_Debug
 # Rule for re-running cmake.
 
 rule RERUN_CMAKE
-  command = C:\ST\STM32CubeIDE_2.1.0\STM32CubeIDE\plugins\com.st.stm32cube.ide.mcu.externaltools.cmake.win32_1.1.100.202601091506\tools\bin\cmake.exe --regenerate-during-build -SC:\Users\Usuario\OneDrive\Documentos\CV_solido\Computadora-de-Vuelo-Solido-2026-2027 -BC:\Users\Usuario\OneDrive\Documentos\CV_solido\Computadora-de-Vuelo-Solido-2026-2027\build\Debug
+  command = C:\ST\STM32CubeIDE_2.1.0\STM32CubeIDE\plugins\com.st.stm32cube.ide.mcu.externaltools.cmake.win32_1.1.100.202601091506\tools\bin\cmake.exe --regenerate-during-build -SC:\Users\Usuario\OneDrive\Documentos\CV_github\Computadora-de-Vuelo-Solido-2026-2027 -BC:\Users\Usuario\OneDrive\Documentos\CV_github\Computadora-de-Vuelo-Solido-2026-2027\build\Debug
   description = Re-running CMake...
   generator = 1
 

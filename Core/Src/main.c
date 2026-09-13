@@ -26,12 +26,31 @@
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
+typedef enum{
+	ESTADO_LAUNCHPAD=0,
+	ESTADO_ASCENSO=1,
+	ESTADO_APOGEO=2,//activación de primera etapa de recuperación
+	ESTADO_REEFING_LINE=3, //activación de segunda etapa de recuperación
+	ESTADO_ATERRIZAJE=4
+}EstadoVuelo;
 
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
+
+//---------Valores de altura predeterminadas
+#define ALTURA_ERROR_BMP 3
+#define ALTURA_DESPEGUE 10
+#define ALTURA_REEFING_LINE 500
+
+
+#define I2C_RECOV_SCL_PORT  GPIOB
+#define I2C_RECOV_SCL_PIN   GPIO_PIN_8
+
+#define I2C_RECOV_SDA_PORT  GPIOB
+#define I2C_RECOV_SDA_PIN   GPIO_PIN_9
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -63,9 +82,24 @@ float temperatura=0.0f;
 float presion=0.0f; 
 float altura=0.0f;
 
+//------------------Calibración --------------------
+float presion_acumulacion=0.0f;
+float presion_calibrada_suelo=0.0f;
+int cont_calibracion_bmp=0;
+
 //----Variables para calcular altitud --------
+
+
 float presion_nivel_mar=101325.0f;//Este valor esta en pascales
-float altura_nivel_mar; //Es la altura en el suelo
+float altura_nivel_mar=0.0f; //Es la altura en el suelo
+float altura_maxima=0.0f;
+
+//------Variables para estados -----------------
+uint32_t tiempo_canal_etapa_1 = 0;
+uint32_t tiempo_canal_etapa_2 = 0;
+
+
+EstadoVuelo estado=ESTADO_LAUNCHPAD;
 
 /* USER CODE END PV */
 
@@ -83,9 +117,12 @@ static void MX_SPI1_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_USART6_UART_Init(void);
 /* USER CODE BEGIN PFP */
+//-----------------declaración de función recuperación I2C---------------
+void i2c_recover_bus(I2C_HandleTypeDef *hi2c);
 
+/*
 //-------------Aqui se pondran las funciones creadas--------------
-/*int __io_putchar(int ch){
+int __io_putchar(int ch){
 
   //----UART para debugger -----
   HAL_StatusTypeDef HAL_USART_Transmit(&huart1,(uint8_t *)&ch,1,0xFFFF);
@@ -179,21 +216,28 @@ int main(void)
 
 
   //Se inicializa el BMP280
-  if (!bmp280_init(&bmp280, &parametro_bmp280)){
-  	// Mensaje de error
+  while(!bmp280_init(&bmp280, &parametro_bmp280)){
     printf("No se dectecto y/o inicializo el BMP280\n");
-    Error_Handler();//Se mete interrupcion y se prende led 
+
+    //-------recuperar I2C--------------------
+    i2c_recover_bus(&hi2c1);
 
   }
 
   //----------Se obtiene por primera vez los datos ----------
   while(!bmp280_read_float(&bmp280,&temperatura,&presion,NULL)){
     printf("No se pudieron asignar valores .... BMP280\n");
-    Error_Handler();
     }
   
-  //----- se calcula la altura con respecto a nivel del mar --------
-  altura_nivel_mar=CalcularAltura(presion,presion_nivel_mar);
+
+  //----------Se calibra la altura inicial para una mejor lectura ----------
+  while(!bmp280_read_float(&bmp280,&temperatura,&presion,NULL) && cont_calibracion_bmp>100){
+	  presion_acumulacion=presion_acumulacion+presion;
+  }
+
+  presion_calibrada_suelo=presion_acumulacion/cont_calibracion_bmp;
+  //----- se calcula la altura con respecto a nivel del mar calibrada --------
+  altura_nivel_mar=CalcularAltura(presion_calibrada_suelo,presion_nivel_mar);
 
   //-------Condición de seguridad ----------
   if(isnan(altura_nivel_mar)){
@@ -202,7 +246,6 @@ int main(void)
   }
 
   
-  
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -210,19 +253,77 @@ int main(void)
   while (1)
   {
     while(!bmp280_read_float(&bmp280,&temperatura,&presion,NULL)){
-     // printf("No se pudieron asignar valores .... BMP280\n");
-      Error_Handler();
+      printf("No se pudieron asignar valores .... BMP280\n");
     }
 
     altura=CalcularAltura(presion,presion_nivel_mar)-altura_nivel_mar;
 
-    if(isnan(altura)){
-  //    printf("No se pudo calcular la medida de altura\n");
-      Error_Handler();
-   }
+    while(isnan(altura))
+    	printf("No se pudo calcular la medida de altura\n");
 
+
+    if(altura > altura_maxima)
+    	altura_maxima=altura;
+
+ //----------------------Lógica de vuelo -----------------------------
+    switch(estado)
+    {
+    	case ESTADO_LAUNCHPAD:
+    		if(altura > ALTURA_DESPEGUE){
+
+    			//Esto solo es de prueba para anlizarlo posteriormente
+    			HAL_GPIO_WritePin(GPIOC,GPIO_PIN_3,GPIO_PIN_SET);
+    			HAL_Delay(1000);
+    			HAL_GPIO_WritePin(GPIOC,GPIO_PIN_3,GPIO_PIN_RESET);
+    			HAL_Delay(1000);
+
+    			estado=ESTADO_ASCENSO;
+    		}
+    			break;
+
+    	case ESTADO_ASCENSO:
+			//Esto solo es de prueba para anlizarlo posteriormente se debe de quitar para no parar el código
+			  HAL_GPIO_WritePin(GPIOC,GPIO_PIN_3,GPIO_PIN_SET);
+			  HAL_Delay(1000);
+			  HAL_GPIO_WritePin(GPIOC,GPIO_PIN_3,GPIO_PIN_RESET);
+			  HAL_Delay(1000);
+
+			  if(altura <(altura_maxima - ALTURA_ERROR_BMP)){
+				  estado=ESTADO_APOGEO;
+				  HAL_GPIO_WritePin(GPIOA,GPIO_PIN_3,GPIO_PIN_SET);
+
+		 //----------se empieza a contar el tiempo para dejar encendido ....etapa 1 ----------
+				  tiempo_canal_etapa_1=HAL_GetTick();
+
+			  }
+    			break;
+    	case ESTADO_APOGEO:
+    		//-------------tiempo de encendido canal 1-----------------
+    		if(HAL_GetTick()-tiempo_canal_etapa_1>=1000){
+    			HAL_GPIO_WritePin(GPIOA,GPIO_PIN_3,GPIO_PIN_RESET);
+    		}
+
+    		//condición para la reefing line
+    		if(altura<=500){
+    			HAL_GPIO_WritePin(GPIOA,GPIO_PIN_3,GPIO_PIN_RESET);//Por si en dado caso no llega a 2km
+    			estado=ESTADO_REEFING_LINE;
+    			HAL_GPIO_WritePin(GPIOA,GPIO_PIN_2,GPIO_PIN_SET);
+     //----------se empieza a contar el tiempo para dejar encendido ....etapa 1 ----------
+    			tiempo_canal_etapa_2=HAL_GetTick();
+
+    		}
+    		break;
+    	case ESTADO_REEFING_LINE:
+    		if(HAL_GetTick()-tiempo_canal_etapa_2>=1000){
+    			HAL_GPIO_WritePin(GPIOA,GPIO_PIN_2,GPIO_PIN_RESET);
+    		}
+    		break;
+    	case ESTADO_ATERRIZAJE:
+    		break;
+
+
+    		}
     
-    //Aqui irá la lógica 
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -236,55 +337,31 @@ int main(void)
   */
 void SystemClock_Config(void)
 {
-    RCC_OscInitTypeDef RCC_OscInitStruct = {0};
-    RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
+  RCC_OscInitTypeDef RCC_OscInitStruct = {0};
+  RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
-    __HAL_RCC_PWR_CLK_ENABLE();
-    __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
+  /** Configure the main internal regulator output voltage
+  */
+  __HAL_RCC_PWR_CLK_ENABLE();
+  __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
 
-
-    __HAL_RCC_PWR_CLK_ENABLE();
-    __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
-
-    /*
-     * PRUEBA 1:
-     * Encender HSI y APAGAR explícitamente PLL
-     */
-    RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
-    RCC_OscInitStruct.HSIState = RCC_HSI_ON;
-    RCC_OscInitStruct.HSICalibrationValue =RCC_HSICALIBRATION_DEFAULT;
-    RCC_OscInitStruct.PLL.PLLState = RCC_PLL_OFF;
-
-    if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
-    {
-        Error_Handler();
-    }
-
-    /*
-     * PRUEBA 2:
-     * Ahora configurar PLL usando HSI
-     */
-    RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
-
-    RCC_OscInitStruct.HSIState = RCC_HSI_ON;
-    RCC_OscInitStruct.HSICalibrationValue =
-        RCC_HSICALIBRATION_DEFAULT;
-
-    RCC_OscInitStruct.PLL.PLLState  = RCC_PLL_ON;
-    RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
-
-    RCC_OscInitStruct.PLL.PLLM = 8;
-    RCC_OscInitStruct.PLL.PLLN = 168;
-    RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
-    RCC_OscInitStruct.PLL.PLLQ = 7;
-
-    if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
-    {
-        Error_Handler();
-    }
-
-    /* Si llega aquí, PLL arrancó correctamente */
-
+  /** Initializes the RCC Oscillators according to the specified parameters
+  * in the RCC_OscInitTypeDef structure.
+  */
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI|RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
+  RCC_OscInitStruct.HSIState = RCC_HSI_ON;
+  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
+  RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
+  RCC_OscInitStruct.PLL.PLLM = 8;
+  RCC_OscInitStruct.PLL.PLLN = 168;
+  RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
+  RCC_OscInitStruct.PLL.PLLQ = 7;
+  if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK)
+  {
+    Error_Handler();
+  }
 
   /** Initializes the CPU, AHB and APB buses clocks
   */
@@ -776,7 +853,100 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
+void i2c_recover_bus(I2C_HandleTypeDef *hi2c)
+{
+    GPIO_InitTypeDef gpio = {0};
 
+    /* 1. Desactivar I2C */
+    HAL_I2C_DeInit(hi2c);
+
+    /* 2. Habilitar reloj del GPIO */
+    __HAL_RCC_GPIOB_CLK_ENABLE();
+
+    /* 3. SCL y SDA como GPIO Open Drain */
+    gpio.Mode  = GPIO_MODE_OUTPUT_OD;
+    gpio.Pull  = GPIO_NOPULL;
+    gpio.Speed = GPIO_SPEED_FREQ_LOW;
+
+    gpio.Pin = I2C_RECOV_SCL_PIN;
+    HAL_GPIO_Init(I2C_RECOV_SCL_PORT, &gpio);
+
+    gpio.Pin = I2C_RECOV_SDA_PIN;
+    HAL_GPIO_Init(I2C_RECOV_SDA_PORT, &gpio);
+
+    /* Liberar bus */
+    HAL_GPIO_WritePin(I2C_RECOV_SCL_PORT,
+                      I2C_RECOV_SCL_PIN,
+                      GPIO_PIN_SET);
+
+    HAL_GPIO_WritePin(I2C_RECOV_SDA_PORT,
+                      I2C_RECOV_SDA_PIN,
+                      GPIO_PIN_SET);
+
+    HAL_Delay(1);
+
+    /* 4. Hasta 9 pulsos de SCL */
+    for (int i = 0; i < 9; i++)
+    {
+        /* Si SDA ya está libre, terminar */
+        if (HAL_GPIO_ReadPin(I2C_RECOV_SDA_PORT,
+                             I2C_RECOV_SDA_PIN) == GPIO_PIN_SET)
+        {
+            break;
+        }
+
+        /* SCL LOW */
+        HAL_GPIO_WritePin(I2C_RECOV_SCL_PORT,
+                          I2C_RECOV_SCL_PIN,
+                          GPIO_PIN_RESET);
+
+        HAL_Delay(1);
+
+        /* SCL HIGH */
+        HAL_GPIO_WritePin(I2C_RECOV_SCL_PORT,
+                          I2C_RECOV_SCL_PIN,
+                          GPIO_PIN_SET);
+
+        HAL_Delay(1);
+    }
+
+    /* 5. Generar STOP:
+       SDA LOW -> SCL HIGH -> SDA HIGH
+    */
+
+    HAL_GPIO_WritePin(I2C_RECOV_SDA_PORT,
+                      I2C_RECOV_SDA_PIN,
+                      GPIO_PIN_RESET);
+
+    HAL_Delay(1);
+
+    HAL_GPIO_WritePin(I2C_RECOV_SCL_PORT,
+                      I2C_RECOV_SCL_PIN,
+                      GPIO_PIN_SET);
+
+    HAL_Delay(1);
+
+    HAL_GPIO_WritePin(I2C_RECOV_SDA_PORT,
+                      I2C_RECOV_SDA_PIN,
+                      GPIO_PIN_SET);
+
+    HAL_Delay(1);
+
+    /* 6. Regresar pines a Alternate Function I2C */
+    gpio.Mode      = GPIO_MODE_AF_OD;
+    gpio.Pull      = GPIO_NOPULL;
+    gpio.Speed     = GPIO_SPEED_FREQ_VERY_HIGH;
+    gpio.Alternate = GPIO_AF4_I2C1;
+
+    gpio.Pin = I2C_RECOV_SCL_PIN;
+    HAL_GPIO_Init(I2C_RECOV_SCL_PORT, &gpio);
+
+    gpio.Pin = I2C_RECOV_SDA_PIN;
+    HAL_GPIO_Init(I2C_RECOV_SDA_PORT, &gpio);
+
+    /* 7. Reiniciar periférico I2C */
+    HAL_I2C_Init(hi2c);
+}
 /* USER CODE END 4 */
 
 /**
@@ -788,7 +958,6 @@ void Error_Handler(void)
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
   __disable_irq();
-  HAL_GPIO_WritePin(GPIOC, GPIO_PIN_3, GPIO_PIN_SET);
   while (1)
   {
   }

@@ -1,4 +1,4 @@
-# Install script for directory: C:/Users/Usuario/OneDrive/Documentos/CV_solido/Computadora-de-Vuelo-Solido-2026-2027/cmake/stm32cubemx
+# Install script for directory: C:/Users/Usuario/OneDrive/Documentos/CV_github/Computadora-de-Vuelo-Solido-2026-2027/cmake/stm32cubemx
 
 # Set the install prefix
 if(NOT DEFINED CMAKE_INSTALL_PREFIX)
