@@ -18,10 +18,17 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "fatfs.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "bmp280.h"
+#include <stdio.h>
+#include <string.h>
+#include <math.h>
+#include "sd_functions.h"
+
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -68,6 +75,8 @@ CAN_HandleTypeDef hcan2;
 I2C_HandleTypeDef hi2c1;
 I2C_HandleTypeDef hi2c2;
 
+SD_HandleTypeDef hsd;
+
 SPI_HandleTypeDef hspi1;
 
 UART_HandleTypeDef huart1;
@@ -99,6 +108,23 @@ uint32_t tiempo_canal_etapa_2 = 0;
 
 EstadoVuelo estado=ESTADO_LAUNCHPAD;
 
+
+
+
+//---------------Variables de SD---------------
+FATFS SD;
+FIL archivo_vuelo;
+FRESULT archivo_estatus;
+FILINFO fno;
+
+uint8_t bufr[80];//informacion leida
+UINT br; //Para bytes leidos
+char header_archivo[]="t_ms,presion,temperatura,altura,altura_max,ax,ay,az,gx,gy,gz,mx,my,mz,v,estado\r\n";
+char lecturas_archivo[200];
+char nombre_archivo[20];
+int contador_lecturas_guardadas;
+int numero_archivo;
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -113,20 +139,21 @@ static void MX_I2C2_Init(void);
 static void MX_SPI1_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_USART6_UART_Init(void);
+static void MX_SDIO_SD_Init(void);
 /* USER CODE BEGIN PFP */
 //-----------------declaración de función recuperación I2C---------------
 void i2c_recover_bus(I2C_HandleTypeDef *hi2c);
 
-/*
+
 //-------------Aqui se pondran las funciones creadas--------------
 int __io_putchar(int ch){
 
   //----UART para debugger -----
-  HAL_StatusTypeDef HAL_USART_Transmit(&huart1,(uint8_t *)&ch,1,0xFFFF);
+  HAL_UART_Transmit(&huart1,(uint8_t *)&ch,1,0xFFFF);
 
   return ch;
 
-}*/
+}
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -182,14 +209,76 @@ int main(void)
   MX_SPI1_Init();
   MX_USART1_UART_Init();
   MX_USART6_UART_Init();
+  MX_SDIO_SD_Init();
+  MX_FATFS_Init();
   /* USER CODE BEGIN 2 */
+  hsd.Init.ClockDiv = 10;
+
+  //----------------Se inicializa SD------------------
+  if (BSP_SD_Init() != MSD_OK)
+  {
+      printf("Error inicializando SD\r\n");
+
+      while (1)
+      {
+          HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_3);
+          HAL_Delay(200);
+      }
+  }
+
+  //-----------Creación e inicialización de archivo SD------------
+  if(sd_mount()!=FR_OK){
+	  while(1)
+	  	  {
+		  HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_3);
+		  HAL_Delay(200);
+	  	  }
+  }
+
+  //----------Nombre del archivo ----------------------
+	while(1)
+	{
+	    snprintf(nombre_archivo,
+	    		sizeof(nombre_archivo),
+	            "Vuelo%03d.CSV",
+	            numero_archivo);
+	    archivo_estatus=f_stat(nombre_archivo, &fno);
+	    if(archivo_estatus == FR_NO_FILE)
+	    {
+	        break;
+	    }
+
+	    if(archivo_estatus!=FR_OK)
+	    {
+	    	HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_3);
+	    	HAL_Delay(200);
+	    }
+
+	    numero_archivo++;
+	}
+
+	//--------------Abrir sesión de datos -----------
+	if(sd_open_log(nombre_archivo) != FR_OK)
+	  	{
+	  	    while(1)
+	  	    {
+	  	        HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_3);
+	  	        HAL_Delay(200);
+	  	    }
+	  	}
+
+	//---------------------Se escribe el encabezado ---------------------
+	if(sd_write_log(header_archivo,&contador_lecturas_guardadas)!=FR_OK)
+	{
+		while(1)
+		  	    {
+		  	        HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_3);
+		  	        HAL_Delay(200);
+		  	    }
+	}
+	contador_lecturas_guardadas=0;
 
 
-  HAL_GPIO_WritePin(GPIOC,GPIO_PIN_3,GPIO_PIN_SET);
-
-  HAL_Delay(1000);
-
-  HAL_GPIO_WritePin(GPIOC,GPIO_PIN_3,GPIO_PIN_RESET);
 
   //--------Inicialización del BMP280-------------
 
@@ -199,45 +288,50 @@ int main(void)
   bmp280.addr=BMP280_I2C_ADDRESS_0;
 
 
- /* //Si queremos utilizar SPI
-  bmp280.comm_mode=BMP280_MODE_SPI;
-  bmp280.spi=&hspi1;
-  bmp280.cs_port=GPIOA;
-  bmp280.cs_pin=GPIO_PIN_12;
-*/
+ //Si queremos utilizar SPI
+  //bmp280.comm_mode=BMP280_MODE_SPI;
+  //bmp280.spi=&hspi1;
+  //bmp280.cs_port=GPIOB;
+  //bmp280.cs_pin=GPIO_PIN_12;
+
   bmp280_init_default_params(&parametro_bmp280);
 
   //----- Aqui va el cambio de parametros ----
-  parametro_bmp280.filter=BMP280_FILTER_4;
-  parametro_bmp280.oversampling_pressure=BMP280_HIGH_RES;
-  parametro_bmp280.oversampling_temperature=BMP280_HIGH_RES;
-  parametro_bmp280.standby=BMP280_STANDBY_05;
+  //parametro_bmp280.filter=BMP280_FILTER_4;
+  //parametro_bmp280.oversampling_pressure=BMP280_HIGH_RES;
+  //parametro_bmp280.oversampling_temperature=BMP280_HIGH_RES;
+  //parametro_bmp280.standby=BMP280_STANDBY_05;
 
-
+  parametro_bmp280.mode = BMP280_MODE_NORMAL;
+  parametro_bmp280.filter = BMP280_FILTER_4;
+  parametro_bmp280.oversampling_pressure = BMP280_HIGH_RES;
+  parametro_bmp280.oversampling_temperature = BMP280_HIGH_RES;
+  parametro_bmp280.standby = BMP280_STANDBY_05;
 
   //Se inicializa el BMP280
   while(!bmp280_init(&bmp280, &parametro_bmp280)){
     printf("No se dectecto y/o inicializo el BMP280\n");
 
     //-------recuperar I2C--------------------
-    i2c_recover_bus(&hi2c1);
-
   }
+
+  HAL_Delay(100);
+
 
   //----------Se obtiene por primera vez los datos ----------
   while(!bmp280_read_float(&bmp280,&temperatura,&presion,NULL)){
     printf("No se pudieron asignar valores .... BMP280\n");
     }
-  
+
 
   //----------Se calibra la altura inicial para una mejor lectura ----------
-  while(cont_calibracion_bmp<100){
+  /*while(cont_calibracion_bmp<100){
 	  bmp280_read_float(&bmp280,&temperatura,&presion,NULL);
 	  presion_acumulacion=presion_acumulacion+presion;
 	  cont_calibracion_bmp++;
-  }
+  }*/
 
-  presion_calibrada_suelo=presion_acumulacion/(float)cont_calibracion_bmp;
+  presion_calibrada_suelo=presion;//presion_acumulacion/(float)cont_calibracion_bmp;
   //----- se calcula la altura con respecto a nivel del mar calibrada --------
   altura_nivel_mar=CalcularAltura(presion_calibrada_suelo,presion_nivel_mar);
 
@@ -267,17 +361,31 @@ int main(void)
     if(altura > altura_maxima)
     	altura_maxima=altura;
 
+    printf("Altura: %.2f\n",altura);
+    printf("Altura maxima: %.2f\n",altura_maxima);
+    printf("estado %d\n",estado);
+    printf("presion %.2f\n",presion);
+    printf("altura mar: %.2f\n", altura_nivel_mar);
+
+    //--------------Guarda solo la presion y altura ---------------
+    snprintf(lecturas_archivo,
+             sizeof(lecturas_archivo),
+             "%lu,%.2f,%.2f\r\n",
+             HAL_GetTick(),
+             presion,
+             altura);
+
+    if(sd_write_log(lecturas_archivo,
+                    &contador_lecturas_guardadas) != FR_OK)
+    {
+        printf("Error escribiendo en SD\n");
+    }
+
  //----------------------Lógica de vuelo -----------------------------
     switch(estado)
     {
     	case ESTADO_LAUNCHPAD:
     		if(altura > ALTURA_DESPEGUE){
-
-    			//Esto solo es de prueba para anlizarlo posteriormente
-    			HAL_GPIO_WritePin(GPIOC,GPIO_PIN_3,GPIO_PIN_SET);
-    			HAL_Delay(1000);
-    			HAL_GPIO_WritePin(GPIOC,GPIO_PIN_3,GPIO_PIN_RESET);
-    			HAL_Delay(1000);
 
     			estado=ESTADO_ASCENSO;
     		}
@@ -350,11 +458,10 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
-  RCC_OscInitStruct.HSIState = RCC_HSI_ON;
-  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
+  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
   RCC_OscInitStruct.PLL.PLLM = 8;
   RCC_OscInitStruct.PLL.PLLN = 168;
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
@@ -626,6 +733,34 @@ static void MX_I2C2_Init(void)
 }
 
 /**
+  * @brief SDIO Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_SDIO_SD_Init(void)
+{
+
+  /* USER CODE BEGIN SDIO_Init 0 */
+
+  /* USER CODE END SDIO_Init 0 */
+
+  /* USER CODE BEGIN SDIO_Init 1 */
+
+  /* USER CODE END SDIO_Init 1 */
+  hsd.Instance = SDIO;
+  hsd.Init.ClockEdge = SDIO_CLOCK_EDGE_RISING;
+  hsd.Init.ClockBypass = SDIO_CLOCK_BYPASS_DISABLE;
+  hsd.Init.ClockPowerSave = SDIO_CLOCK_POWER_SAVE_DISABLE;
+  hsd.Init.BusWide = SDIO_BUS_WIDE_1B;
+  hsd.Init.HardwareFlowControl = SDIO_HARDWARE_FLOW_CONTROL_DISABLE;
+  hsd.Init.ClockDiv = 0;
+  /* USER CODE BEGIN SDIO_Init 2 */
+
+  /* USER CODE END SDIO_Init 2 */
+
+}
+
+/**
   * @brief SPI1 Initialization Function
   * @param None
   * @retval None
@@ -648,7 +783,7 @@ static void MX_SPI1_Init(void)
   hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
   hspi1.Init.NSS = SPI_NSS_SOFT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_16;
   hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
@@ -746,6 +881,7 @@ static void MX_GPIO_Init(void)
   __HAL_RCC_GPIOH_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
+  __HAL_RCC_GPIOD_CLK_ENABLE();
 
   /*Configure GPIO pin Output Level */
   HAL_GPIO_WritePin(GPIOC, GPIO_PIN_13|GPIO_PIN_3, GPIO_PIN_RESET);
@@ -754,8 +890,8 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_2|GPIO_PIN_3, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15|GPIO_PIN_3
-                          |GPIO_PIN_4, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12|GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15
+                          |GPIO_PIN_3|GPIO_PIN_4, GPIO_PIN_RESET);
 
   /*Configure GPIO pins : PC13 PC3 */
   GPIO_InitStruct.Pin = GPIO_PIN_13|GPIO_PIN_3;
@@ -777,16 +913,16 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PB2 PB12 */
-  GPIO_InitStruct.Pin = GPIO_PIN_2|GPIO_PIN_12;
+  /*Configure GPIO pin : PB2 */
+  GPIO_InitStruct.Pin = GPIO_PIN_2;
   GPIO_InitStruct.Mode = GPIO_MODE_INPUT;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PB13 PB14 PB15 PB3
-                           PB4 */
-  GPIO_InitStruct.Pin = GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15|GPIO_PIN_3
-                          |GPIO_PIN_4;
+  /*Configure GPIO pins : PB12 PB13 PB14 PB15
+                           PB3 PB4 */
+  GPIO_InitStruct.Pin = GPIO_PIN_12|GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15
+                          |GPIO_PIN_3|GPIO_PIN_4;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;

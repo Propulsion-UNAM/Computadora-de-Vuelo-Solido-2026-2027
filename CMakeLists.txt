@@ -45,6 +45,7 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 # Add sources to executable
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
 ./Core/Src/bmp280.c
+./Core/Src/sd_functions.c
     # Add user sources here
 )
 
@@ -58,6 +59,12 @@ target_compile_definitions(${CMAKE_PROJECT_NAME} PRIVATE
     # Add user defined symbols
 )
 
+# Linker options
+target_link_options(${CMAKE_PROJECT_NAME} PRIVATE
+
+    -u _printf_float
+
+)
 
 
 # Remove wrong libob.a library dependency when using cpp files

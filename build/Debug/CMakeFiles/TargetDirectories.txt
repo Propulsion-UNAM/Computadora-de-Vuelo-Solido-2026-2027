@@ -2,5 +2,6 @@ C:/Users/Usuario/OneDrive/Documentos/CV_github/Computadora-de-Vuelo-Solido-2026-
 C:/Users/Usuario/OneDrive/Documentos/CV_github/Computadora-de-Vuelo-Solido-2026-2027/build/Debug/CMakeFiles/edit_cache.dir
 C:/Users/Usuario/OneDrive/Documentos/CV_github/Computadora-de-Vuelo-Solido-2026-2027/build/Debug/CMakeFiles/rebuild_cache.dir
 C:/Users/Usuario/OneDrive/Documentos/CV_github/Computadora-de-Vuelo-Solido-2026-2027/build/Debug/cmake/stm32cubemx/CMakeFiles/STM32_Drivers.dir
+C:/Users/Usuario/OneDrive/Documentos/CV_github/Computadora-de-Vuelo-Solido-2026-2027/build/Debug/cmake/stm32cubemx/CMakeFiles/FatFs.dir
 C:/Users/Usuario/OneDrive/Documentos/CV_github/Computadora-de-Vuelo-Solido-2026-2027/build/Debug/cmake/stm32cubemx/CMakeFiles/edit_cache.dir
 C:/Users/Usuario/OneDrive/Documentos/CV_github/Computadora-de-Vuelo-Solido-2026-2027/build/Debug/cmake/stm32cubemx/CMakeFiles/rebuild_cache.dir

@@ -59,6 +59,16 @@ rule C_COMPILER__STM32_Drivers_unscanned_Debug
 
 
 #############################################
+# Rule for compiling C files.
+
+rule C_COMPILER__FatFs_unscanned_Debug
+  depfile = $DEP_FILE
+  deps = gcc
+  command = ${LAUNCHER}${CODE_CHECK}C:\ST\STM32CubeIDE_2.1.0\STM32CubeIDE\plugins\com.st.stm32cube.ide.mcu.externaltools.gnu-tools-for-stm32.14.3.rel1.win32_1.0.100.202602081740\tools\bin\arm-none-eabi-gcc.exe $DEFINES $INCLUDES $FLAGS -MD -MT $out -MF $DEP_FILE -o $out -c $in
+  description = Building C object $out
+
+
+#############################################
 # Rule for re-running cmake.
 
 rule RERUN_CMAKE
