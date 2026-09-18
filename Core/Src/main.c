@@ -214,6 +214,7 @@ int main(void)
   /* USER CODE BEGIN 2 */
   hsd.Init.ClockDiv = 10;
 
+/*
   //----------------Se inicializa SD------------------
   if (BSP_SD_Init() != MSD_OK)
   {
@@ -279,20 +280,20 @@ int main(void)
 	contador_lecturas_guardadas=0;
 
 
-
+*/
   //--------Inicialización del BMP280-------------
 
   /*Si queremos utilizar I2C*/
-  bmp280.comm_mode=BMP280_MODE_I2C;
-  bmp280.i2c=&hi2c1;
-  bmp280.addr=BMP280_I2C_ADDRESS_0;
+ // bmp280.comm_mode=BMP280_MODE_I2C;
+ // bmp280.i2c=&hi2c1;
+ // bmp280.addr=BMP280_I2C_ADDRESS_0;
 
 
  //Si queremos utilizar SPI
-  //bmp280.comm_mode=BMP280_MODE_SPI;
-  //bmp280.spi=&hspi1;
-  //bmp280.cs_port=GPIOB;
-  //bmp280.cs_pin=GPIO_PIN_12;
+  bmp280.comm_mode=BMP280_MODE_SPI;
+  bmp280.spi=&hspi1;
+  bmp280.cs_port=GPIOB;
+  bmp280.cs_pin=GPIO_PIN_12;
 
   bmp280_init_default_params(&parametro_bmp280);
 
@@ -340,6 +341,15 @@ int main(void)
     printf("No se pudo calcular la medida de altura inicial (nivel del mar)\n");
     Error_Handler();
   }
+
+  HAL_GPIO_WritePin(GPIOC,GPIO_PIN_3,GPIO_PIN_SET);
+  			  HAL_Delay(1000);
+  			  HAL_GPIO_WritePin(GPIOC,GPIO_PIN_3,GPIO_PIN_RESET);
+  			  HAL_Delay(1000);
+  			 HAL_GPIO_WritePin(GPIOC,GPIO_PIN_3,GPIO_PIN_SET);
+  			  			  HAL_Delay(1000);
+  			  			  HAL_GPIO_WritePin(GPIOC,GPIO_PIN_3,GPIO_PIN_RESET);
+  			  			  HAL_Delay(1000);
 
   
   /* USER CODE END 2 */
