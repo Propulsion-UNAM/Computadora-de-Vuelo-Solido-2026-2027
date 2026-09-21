@@ -18,18 +18,12 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "fatfs.h"
-#include "stm32f4xx_hal_gpio.h"
-#include "stm32f4xx_hal_sd.h"
-#include "stm32f4xx_hal_spi.h"
-#include "stm32f4xx_ll_sdmmc.h"
-#include "lora.h"
-#include "telemetria.h"
-
+#include "fatfs.-----------------------------                                                                                                                                                                                                                                h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
-
+#include "telemetria.h"
+#include "LoRa.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -97,7 +91,7 @@ int __io_putchar(int ch) {
 
 /* USER CODE END PFP */
 
-
+/* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
 
 /* USER CODE END 0 */
@@ -106,7 +100,9 @@ int __io_putchar(int ch) {
   * @brief  The application entry point.
   * @retval int
   */
-int main(void) { 
+int main(void)
+{
+
   /* USER CODE BEGIN 1 */
 
   /* USER CODE END 1 */
@@ -135,7 +131,6 @@ int main(void) {
   MX_CAN2_Init();
   MX_I2C1_Init();
   MX_I2C2_Init();
-  MX_SDIO_SD_Init();
   MX_SPI1_Init();
   MX_USART1_UART_Init();
   MX_USART6_UART_Init();
@@ -164,6 +159,7 @@ int main(void) {
   /* USER CODE BEGIN WHILE */
   while (1) {
     /* USER CODE END WHILE */
+
     /* USER CODE BEGIN 3 */
 
     telemetria_t tx = {
@@ -195,7 +191,8 @@ int main(void) {
   * @brief System Clock Configuration
   * @retval None
   */
-void SystemClock_Config(void) {
+void SystemClock_Config(void)
+{
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
@@ -240,7 +237,8 @@ void SystemClock_Config(void) {
   * @param None
   * @retval None
   */
-static void MX_ADC1_Init(void) {
+static void MX_ADC1_Init(void)
+{
 
   /* USER CODE BEGIN ADC1_Init 0 */
 
@@ -291,7 +289,8 @@ static void MX_ADC1_Init(void) {
   * @param None
   * @retval None
   */
-static void MX_ADC2_Init(void) {
+static void MX_ADC2_Init(void)
+{
 
   /* USER CODE BEGIN ADC2_Init 0 */
 
@@ -342,7 +341,8 @@ static void MX_ADC2_Init(void) {
   * @param None
   * @retval None
   */
-static void MX_CAN1_Init(void) {
+static void MX_CAN1_Init(void)
+{
 
   /* USER CODE BEGIN CAN1_Init 0 */
 
@@ -378,7 +378,8 @@ static void MX_CAN1_Init(void) {
   * @param None
   * @retval None
   */
-static void MX_CAN2_Init(void) {
+static void MX_CAN2_Init(void)
+{
 
   /* USER CODE BEGIN CAN2_Init 0 */
 
@@ -414,7 +415,8 @@ static void MX_CAN2_Init(void) {
   * @param None
   * @retval None
   */
-static void MX_I2C1_Init(void) {
+static void MX_I2C1_Init(void)
+{
 
   /* USER CODE BEGIN I2C1_Init 0 */
 
@@ -447,7 +449,8 @@ static void MX_I2C1_Init(void) {
   * @param None
   * @retval None
   */
-static void MX_I2C2_Init(void) {
+static void MX_I2C2_Init(void)
+{
 
   /* USER CODE BEGIN I2C2_Init 0 */
 
@@ -480,7 +483,8 @@ static void MX_I2C2_Init(void) {
   * @param None
   * @retval None
   */
-static void MX_SDIO_SD_Init(void) {
+static void MX_SDIO_SD_Init(void)
+{
 
   /* USER CODE BEGIN SDIO_Init 0 */
 
@@ -516,7 +520,8 @@ static void MX_SDIO_SD_Init(void) {
   * @param None
   * @retval None
   */
-static void MX_SPI1_Init(void) {
+static void MX_SPI1_Init(void)
+{
 
   /* USER CODE BEGIN SPI1_Init 0 */
 
@@ -553,7 +558,8 @@ static void MX_SPI1_Init(void) {
   * @param None
   * @retval None
   */
-static void MX_USART1_UART_Init(void) {
+static void MX_USART1_UART_Init(void)
+{
 
   /* USER CODE BEGIN USART1_Init 0 */
 
@@ -585,7 +591,8 @@ static void MX_USART1_UART_Init(void) {
   * @param None
   * @retval None
   */
-static void MX_USART6_UART_Init(void) {
+static void MX_USART6_UART_Init(void)
+{
 
   /* USER CODE BEGIN USART6_Init 0 */
 
@@ -617,7 +624,8 @@ static void MX_USART6_UART_Init(void) {
   * @param None
   * @retval None
   */
-static void MX_GPIO_Init(void) {
+static void MX_GPIO_Init(void)
+{
   GPIO_InitTypeDef GPIO_InitStruct = {0};
   /* USER CODE BEGIN MX_GPIO_Init_1 */
 
@@ -707,7 +715,8 @@ static void MX_GPIO_Init(void) {
   * @brief  This function is executed in case of error occurrence.
   * @retval None
   */
-void Error_Handler(void) {
+void Error_Handler(void)
+{
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
   __disable_irq();
