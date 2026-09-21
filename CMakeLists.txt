@@ -46,6 +46,8 @@ target_link_directories(${CMAKE_PROJECT_NAME} PRIVATE
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE
 ./Core/Src/bmp280.c
 ./Core/Src/sd_functions.c
+./Core/Src/mpu6050.c
+./Core/Src/HMC5883L.c
     # Add user sources here
 )
 

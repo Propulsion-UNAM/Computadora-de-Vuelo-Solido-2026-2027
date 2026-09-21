@@ -23,10 +23,12 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 #include "bmp280.h"
+#include "mpu6050.h"
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
 #include "sd_functions.h"
+#include "HMC5883L.h"
 
 
 /* USER CODE END Includes */
@@ -48,9 +50,9 @@ typedef enum{
 
 
 //---------Valores de altura predeterminadas
-#define ALTURA_ERROR_BMP 3
-#define ALTURA_DESPEGUE 10
-#define ALTURA_REEFING_LINE 500
+#define ALTURA_ERROR_BMP 1
+#define ALTURA_DESPEGUE 1
+#define ALTURA_REEFING_LINE 0.5
 
 
 #define I2C_RECOV_SCL_PORT  GPIOB
@@ -58,6 +60,17 @@ typedef enum{
 
 #define I2C_RECOV_SDA_PORT  GPIOB
 #define I2C_RECOV_SDA_PIN   GPIO_PIN_9
+
+//----------------voltaje inicial para sensor de corriente-------------
+#define voltaje_cero_ch3    1.71875f
+#define factor_corriente_voltaje 0.06875f
+
+//-------------definición para calibración de magnetometro------------
+#define OFFSET_X 0
+#define OFFSET_Y 0
+#define OFFSET_Z 0
+
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -109,7 +122,23 @@ uint32_t tiempo_canal_etapa_2 = 0;
 EstadoVuelo estado=ESTADO_LAUNCHPAD;
 
 
+//-----------Variables de aceleración-----------------
 
+float acc_x=0.0f;
+float acc_y=0.0f;
+float acc_z=0.0f;
+
+float gyro_x=0.0f;
+float gyro_y=0.0f;
+float gyro_z=0.0f;
+
+float ang_roll=0.0f;
+float ang_pitch=0.0f;
+
+//---------------Variables magnetometro----------------
+float mag_x=0.0f;
+float mag_y=0.0f;
+float mag_z=0.0f;
 
 //---------------Variables de SD---------------
 FATFS SD;
@@ -125,6 +154,10 @@ char nombre_archivo[20];
 int contador_lecturas_guardadas;
 int numero_archivo;
 
+//---------------variables ADC-------------------
+uint32_t adc1;
+float corriente_ch3=0.0f;
+float voltaje_ch3=0.0f;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -163,11 +196,11 @@ int __io_putchar(int ch){
 BMP280_HandleTypedef bmp280;
 bmp280_params_t parametro_bmp280;
 
+//----------------Crear objeto MPU6050 -------------------------------
+MPU6050_t mpu6050;
 
-
-
-
-
+//----------------------Se crea el vector de variables magnetometro --------------------
+Vector magnetometro;
 
 /* USER CODE END 0 */
 
@@ -279,29 +312,25 @@ int main(void)
 	}
 	contador_lecturas_guardadas=0;
 
-
 */
+
   //--------Inicialización del BMP280-------------
 
   /*Si queremos utilizar I2C*/
- // bmp280.comm_mode=BMP280_MODE_I2C;
- // bmp280.i2c=&hi2c1;
- // bmp280.addr=BMP280_I2C_ADDRESS_0;
+  bmp280.comm_mode=BMP280_MODE_I2C;
+  bmp280.i2c=&hi2c1;
+  bmp280.addr=BMP280_I2C_ADDRESS_0;
 
 
  //Si queremos utilizar SPI
-  bmp280.comm_mode=BMP280_MODE_SPI;
-  bmp280.spi=&hspi1;
-  bmp280.cs_port=GPIOB;
-  bmp280.cs_pin=GPIO_PIN_12;
+  //bmp280.comm_mode=BMP280_MODE_SPI;
+  //bmp280.spi=&hspi1;
+  //bmp280.cs_port=GPIOB;
+  //bmp280.cs_pin=GPIO_PIN_12;
 
   bmp280_init_default_params(&parametro_bmp280);
 
   //----- Aqui va el cambio de parametros ----
-  //parametro_bmp280.filter=BMP280_FILTER_4;
-  //parametro_bmp280.oversampling_pressure=BMP280_HIGH_RES;
-  //parametro_bmp280.oversampling_temperature=BMP280_HIGH_RES;
-  //parametro_bmp280.standby=BMP280_STANDBY_05;
 
   parametro_bmp280.mode = BMP280_MODE_NORMAL;
   parametro_bmp280.filter = BMP280_FILTER_4;
@@ -312,7 +341,7 @@ int main(void)
   //Se inicializa el BMP280
   while(!bmp280_init(&bmp280, &parametro_bmp280)){
     printf("No se dectecto y/o inicializo el BMP280\n");
-
+    i2c_recover_bus(&hi2c1);
     //-------recuperar I2C--------------------
   }
 
@@ -326,11 +355,11 @@ int main(void)
 
 
   //----------Se calibra la altura inicial para una mejor lectura ----------
-  /*while(cont_calibracion_bmp<100){
+  	  while(cont_calibracion_bmp<100){
 	  bmp280_read_float(&bmp280,&temperatura,&presion,NULL);
 	  presion_acumulacion=presion_acumulacion+presion;
 	  cont_calibracion_bmp++;
-  }*/
+  }
 
   presion_calibrada_suelo=presion;//presion_acumulacion/(float)cont_calibracion_bmp;
   //----- se calcula la altura con respecto a nivel del mar calibrada --------
@@ -342,14 +371,31 @@ int main(void)
     Error_Handler();
   }
 
+
+  //---------------Inicializar los registros de MPU6050 y calibración de giroscopio -------------------------
+  	while((MPU6050_Init(&hi2c1) !=HAL_OK)){
+      printf("No se dectectó el MPU6050");
+      i2c_recover_bus(&hi2c1);
+      //Error_Handler();
+    }
+    MPU6050_CalibrateGyro(&hi2c1, &mpu6050);
+
+    //-------------Configuración magnetometro-----------------------------
+    HMC5883L_setOffset(OFFSET_X,OFFSET_Y,OFFSET_Z);
+    HMC5883L_setRange(HMC5883L_RANGE_1_3GA);
+    HMC5883L_setMeasurementMode(HMC5883L_CONTINOUS);
+    HMC5883L_setDataRate(HMC5883L_DATARATE_75HZ );
+    HMC5883L_setSamples(HMC5883L_SAMPLES_8);
+
+
   HAL_GPIO_WritePin(GPIOC,GPIO_PIN_3,GPIO_PIN_SET);
-  			  HAL_Delay(1000);
-  			  HAL_GPIO_WritePin(GPIOC,GPIO_PIN_3,GPIO_PIN_RESET);
-  			  HAL_Delay(1000);
-  			 HAL_GPIO_WritePin(GPIOC,GPIO_PIN_3,GPIO_PIN_SET);
-  			  			  HAL_Delay(1000);
-  			  			  HAL_GPIO_WritePin(GPIOC,GPIO_PIN_3,GPIO_PIN_RESET);
-  			  			  HAL_Delay(1000);
+  HAL_Delay(1000);
+  HAL_GPIO_WritePin(GPIOC,GPIO_PIN_3,GPIO_PIN_RESET);
+  HAL_Delay(1000);
+  HAL_GPIO_WritePin(GPIOC,GPIO_PIN_3,GPIO_PIN_SET);
+  HAL_Delay(1000);
+  HAL_GPIO_WritePin(GPIOC,GPIO_PIN_3,GPIO_PIN_RESET);
+  HAL_Delay(1000);
 
   
   /* USER CODE END 2 */
@@ -358,6 +404,22 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+
+	MPU6050_ReadAccel(&hi2c1, &mpu6050);
+	MPU6050_ReadGyro(&hi2c1, &mpu6050);
+	MPU6050_ComputeAngles(&mpu6050);
+
+	acc_x=(float)mpu6050.acc_raw[0]/2048.0f * 9.80665f;
+	acc_y=(float)mpu6050.acc_raw[1]/2048.0f * 9.80665f;
+	acc_z=(float)mpu6050.acc_raw[2]/2048.0f * 9.80665f;
+
+	gyro_x=mpu6050.gyro_cal[0];
+	gyro_y=mpu6050.gyro_cal[1];
+	gyro_z=mpu6050.gyro_cal[2];
+
+	ang_pitch=mpu6050.angle_pitch;
+	ang_roll=mpu6050.angle_roll;
+
     while(!bmp280_read_float(&bmp280,&temperatura,&presion,NULL)){
       printf("No se pudieron asignar valores .... BMP280\n");
     }
@@ -367,18 +429,28 @@ int main(void)
     while(isnan(altura))
     	printf("No se pudo calcular la medida de altura\n");
 
-
     if(altura > altura_maxima)
     	altura_maxima=altura;
 
-    printf("Altura: %.2f\n",altura);
-    printf("Altura maxima: %.2f\n",altura_maxima);
-    printf("estado %d\n",estado);
-    printf("presion %.2f\n",presion);
-    printf("altura mar: %.2f\n", altura_nivel_mar);
+    //-------------Obtención de datos del magnetometro-----------
+    magnetometro=HMC5883L_readNormalize();
+    mag_x=magnetometro.XAxis;
+    mag_y=magnetometro.YAxis;
+    mag_z=magnetometro.ZAxis;
+
+    //--------------------medición de corriente----------------
+    HAL_ADC_Start(&hadc1);
+    HAL_ADC_PollForConversion(&hadc1, 10);
+    adc1=HAL_ADC_GetValue(&hadc1);
+    HAL_ADC_Stop(&hadc1);
+
+    //--------------Conversion a corriente-----------
+    voltaje_ch3=adc1*(3.3f/4095.0f);
+    corriente_ch3=(voltaje_cero_ch3-voltaje_ch3)/factor_corriente_voltaje;
+
 
     //--------------Guarda solo la presion y altura ---------------
-    snprintf(lecturas_archivo,
+ /*   snprintf(lecturas_archivo,
              sizeof(lecturas_archivo),
              "%lu,%.2f,%.2f\r\n",
              HAL_GetTick(),
@@ -390,7 +462,7 @@ int main(void)
     {
         printf("Error escribiendo en SD\n");
     }
-
+*/
  //----------------------Lógica de vuelo -----------------------------
     switch(estado)
     {
@@ -410,7 +482,7 @@ int main(void)
 
 			  if(altura <(altura_maxima - ALTURA_ERROR_BMP)){
 				  estado=ESTADO_APOGEO;
-				  HAL_GPIO_WritePin(GPIOA,GPIO_PIN_3,GPIO_PIN_SET);
+				  HAL_GPIO_WritePin(GPIOB,GPIO_PIN_14,GPIO_PIN_SET);
 
 		 //----------se empieza a contar el tiempo para dejar encendido ....etapa 1 ----------
 				  tiempo_canal_etapa_1=HAL_GetTick();
@@ -420,11 +492,11 @@ int main(void)
     	case ESTADO_APOGEO:
     		//-------------tiempo de encendido canal 1-----------------
     		if(HAL_GetTick()-tiempo_canal_etapa_1>=1000){
-    			HAL_GPIO_WritePin(GPIOA,GPIO_PIN_3,GPIO_PIN_RESET);
+    			HAL_GPIO_WritePin(GPIOB,GPIO_PIN_14,GPIO_PIN_RESET);
     		}
 
     		//condición para la reefing line
-    		if(altura<=500){
+    		if(altura<=0.5){
     			HAL_GPIO_WritePin(GPIOA,GPIO_PIN_3,GPIO_PIN_RESET);//Por si en dado caso no llega a 2km
     			estado=ESTADO_REEFING_LINE;
     			HAL_GPIO_WritePin(GPIOA,GPIO_PIN_2,GPIO_PIN_SET);
@@ -509,6 +581,7 @@ static void MX_ADC1_Init(void)
   /* USER CODE END ADC1_Init 0 */
 
   ADC_ChannelConfTypeDef sConfig = {0};
+  ADC_InjectionConfTypeDef sConfigInjected = {0};
 
   /* USER CODE BEGIN ADC1_Init 1 */
 
@@ -519,7 +592,7 @@ static void MX_ADC1_Init(void)
   hadc1.Instance = ADC1;
   hadc1.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV4;
   hadc1.Init.Resolution = ADC_RESOLUTION_12B;
-  hadc1.Init.ScanConvMode = DISABLE;
+  hadc1.Init.ScanConvMode = ENABLE;
   hadc1.Init.ContinuousConvMode = DISABLE;
   hadc1.Init.DiscontinuousConvMode = DISABLE;
   hadc1.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
@@ -539,6 +612,22 @@ static void MX_ADC1_Init(void)
   sConfig.Rank = 1;
   sConfig.SamplingTime = ADC_SAMPLETIME_3CYCLES;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+
+  /** Configures for the selected ADC injected channel its corresponding rank in the sequencer and its sample time
+  */
+  sConfigInjected.InjectedChannel = ADC_CHANNEL_9;
+  sConfigInjected.InjectedRank = 1;
+  sConfigInjected.InjectedNbrOfConversion = 1;
+  sConfigInjected.InjectedSamplingTime = ADC_SAMPLETIME_3CYCLES;
+  sConfigInjected.ExternalTrigInjecConvEdge = ADC_EXTERNALTRIGINJECCONVEDGE_NONE;
+  sConfigInjected.ExternalTrigInjecConv = ADC_INJECTED_SOFTWARE_START;
+  sConfigInjected.AutoInjectedConv = DISABLE;
+  sConfigInjected.InjectedDiscontinuousConvMode = DISABLE;
+  sConfigInjected.InjectedOffset = 0;
+  if (HAL_ADCEx_InjectedConfigChannel(&hadc1, &sConfigInjected) != HAL_OK)
   {
     Error_Handler();
   }
@@ -793,7 +882,7 @@ static void MX_SPI1_Init(void)
   hspi1.Init.CLKPolarity = SPI_POLARITY_LOW;
   hspi1.Init.CLKPhase = SPI_PHASE_1EDGE;
   hspi1.Init.NSS = SPI_NSS_SOFT;
-  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_16;
+  hspi1.Init.BaudRatePrescaler = SPI_BAUDRATEPRESCALER_2;
   hspi1.Init.FirstBit = SPI_FIRSTBIT_MSB;
   hspi1.Init.TIMode = SPI_TIMODE_DISABLE;
   hspi1.Init.CRCCalculation = SPI_CRCCALCULATION_DISABLE;
