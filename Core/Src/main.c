@@ -19,8 +19,13 @@
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
 #include "fatfs.h"
+#include "stm32f4xx_hal_gpio.h"
 #include "stm32f4xx_hal_sd.h"
+#include "stm32f4xx_hal_spi.h"
 #include "stm32f4xx_ll_sdmmc.h"
+#include "lora.h"
+#include "telemetria.h"
+
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -61,12 +66,11 @@ UART_HandleTypeDef huart6;
 
 /* USER CODE BEGIN PV */
 
-//-----------------Variables para la creación de archivo con nombre e indice -------------------
-char nombre_archivo[20];
-FIL Archivo;
-FRESULT res;
-FILINFO info;           
-int indice = 1;
+#define NSS_GPIO_Port GPIOB
+#define NSS_Pin GPIO_PIN_3
+
+#define RST_GPIO_Port GPIOB
+#define RST_Pin GPIO_PIN_4
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -90,43 +94,10 @@ int __io_putchar(int ch) {
   return ch;
 }
 
-//---------------------dectectar SD------------------------------
-uint8_t BSP_SD_IsDetected(void)
-{
-  uint8_t Status=SD_PRESENT;
-  return Status;
-
-}
-
-//--------------------Función para guardar datos----------------------------
-void Guardar_Datos_SD(uint32_t tiempo, float alt, float pres, float temp, 
-                      float gx, float gy, float gz, 
-                      float ax, float ay, float az, 
-                      float mx, float my, float mz) {
-    
-    char buffer[150];
-    UINT bytesGuardados;
-    
-    static uint8_t lecturas_guardado=0; 
-    
-    sprintf(buffer, "%lu,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f,%.2f\n", 
-            tiempo, alt, pres, temp, gx, gy, gz, ax, ay, az, mx, my, mz);
-            
-    f_write(&Archivo, buffer, strlen(buffer), &bytesGuardados);
-    
-    // -----------------Incrementar el contador de lecturas-------------------
-    lecturas_guardado++;
-    
-    //-----------------Forzar el guardado cada 50 lecturas---------------- 
-    if (lecturas_guardado>= 50) {
-        f_sync(&Archivo);
-        lecturas_guardado= 0;
-    }
-}
 
 /* USER CODE END PFP */
 
-/* Private user code ---------------------------------------------------------*/
+
 /* USER CODE BEGIN 0 */
 
 /* USER CODE END 0 */
@@ -135,8 +106,7 @@ void Guardar_Datos_SD(uint32_t tiempo, float alt, float pres, float temp,
   * @brief  The application entry point.
   * @retval int
   */
-int main(void)
-{ 
+int main(void) { 
   /* USER CODE BEGIN 1 */
 
   /* USER CODE END 1 */
@@ -171,55 +141,52 @@ int main(void)
   MX_USART6_UART_Init();
   MX_FATFS_Init();
   /* USER CODE BEGIN 2 */
+  /*Lora init begin*/
+  
+    lora_hw_t hw = { &hspi1, NSS_GPIO_Port, NSS_Pin, RST_GPIO_Port, RST_Pin }; 
 
+    lora_set_spreading_factor(9);
+    lora_set_signal_bandwidth(125000);
+    lora_set_coding_rate4(5);
+    lora_set_crc(1);
+    lora_set_tx_power(17, LORA_PA_OUTPUT_PA_BOOST);
 
-printf("SD card information\n");
-printf("Block size :%lu\n", hsd.SdCard.BlockSize);
-printf("Block nmbr :%lu\n", hsd.SdCard.BlockNbr);
-printf("Card size :%lu\n", (hsd.SdCard.BlockSize + hsd.SdCard.BlockNbr)/100);
-printf("Card Version :%lu\n", hsd.SdCard.CardVersion);
-
-if(f_mount(&SDFatFS, (TCHAR const*) SDPath,0)!= FR_OK){
-  printf("Unable to mount disk\n");
-  Error_Handler();
-}
-
-//----------------------Genera el nombre y lo guarda en nombreArchivo-------------------------
- while (1) {
-    sprintf(nombre_archivo,"vuelo_%d.csv",indice);
-    
-    //revisa si existe y si si le agrega uno al indice
-    res = f_stat(nombre_archivo, &info); 
-    if (res == FR_NO_FILE) {
-        break; 
-    }
-    indice++;
-  }
-
-  //----------------------Creación de archivo con encabezado ----------------------------------
-  res = f_open(&Archivo, nombre_archivo, FA_CREATE_ALWAYS | FA_WRITE);
-
-  if (res == FR_OK) {
-    printf("Archivo %s creado exitosamente\r\n", nombre_archivo);
-    
-    char header[] = "Tiempo,Altura,Presión,Temperatura,GiroX,GiroY,GiroZ,AcelX,AcelY,AcelZ,MagX,MagY,MagZ\n";
-    UINT bytesheader;
-    f_write(&Archivo, header, strlen(header), &bytesheader);
-
-  } else {
-    printf("Error al crear %s\r\n", nombre_archivo);
-  }
-
+    if (!lora_begin(&hw, LORA_FREQ_HZ)){
+      while (1) {
+      /* no detectado, posible impresion serial o identificador visual*/
+      }
+    } 
+  /*Lora init end*/
 
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  while (1)
-  {
+  while (1) {
     /* USER CODE END WHILE */
-
     /* USER CODE BEGIN 3 */
+
+    telemetria_t tx = {
+      .t_ms        = HAL_GetTick(),
+      .Altitud     = 101.3f,                       /* reemplaza con los sensores o valores simulados */
+      .AccX = 0.0f,
+      .AccY = 0.0f,
+      .AccZ = 0.0f,
+      .GyrX = 0.0f,
+      .GyrY = 0.0f,
+      .GyrZ = 0.0f,
+      .MagX = 0.0f,
+      .MagY = 0.0f,
+      .MagZ = 0.0f
+    };
+
+    if (lora_send((const uint8_t *)&tx, sizeof tx)){
+      //HAL_GPIO_TogglePin(LED_GPIO_Port, LED_Pin); indicador visual de envio exitoso
+    }
+
+    HAL_Delay(1000);
+
+
   }
   /* USER CODE END 3 */
 }
@@ -228,8 +195,7 @@ if(f_mount(&SDFatFS, (TCHAR const*) SDPath,0)!= FR_OK){
   * @brief System Clock Configuration
   * @retval None
   */
-void SystemClock_Config(void)
-{
+void SystemClock_Config(void) {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
@@ -274,8 +240,7 @@ void SystemClock_Config(void)
   * @param None
   * @retval None
   */
-static void MX_ADC1_Init(void)
-{
+static void MX_ADC1_Init(void) {
 
   /* USER CODE BEGIN ADC1_Init 0 */
 
@@ -326,8 +291,7 @@ static void MX_ADC1_Init(void)
   * @param None
   * @retval None
   */
-static void MX_ADC2_Init(void)
-{
+static void MX_ADC2_Init(void) {
 
   /* USER CODE BEGIN ADC2_Init 0 */
 
@@ -378,8 +342,7 @@ static void MX_ADC2_Init(void)
   * @param None
   * @retval None
   */
-static void MX_CAN1_Init(void)
-{
+static void MX_CAN1_Init(void) {
 
   /* USER CODE BEGIN CAN1_Init 0 */
 
@@ -415,8 +378,7 @@ static void MX_CAN1_Init(void)
   * @param None
   * @retval None
   */
-static void MX_CAN2_Init(void)
-{
+static void MX_CAN2_Init(void) {
 
   /* USER CODE BEGIN CAN2_Init 0 */
 
@@ -452,8 +414,7 @@ static void MX_CAN2_Init(void)
   * @param None
   * @retval None
   */
-static void MX_I2C1_Init(void)
-{
+static void MX_I2C1_Init(void) {
 
   /* USER CODE BEGIN I2C1_Init 0 */
 
@@ -486,8 +447,7 @@ static void MX_I2C1_Init(void)
   * @param None
   * @retval None
   */
-static void MX_I2C2_Init(void)
-{
+static void MX_I2C2_Init(void) {
 
   /* USER CODE BEGIN I2C2_Init 0 */
 
@@ -520,8 +480,7 @@ static void MX_I2C2_Init(void)
   * @param None
   * @retval None
   */
-static void MX_SDIO_SD_Init(void)
-{
+static void MX_SDIO_SD_Init(void) {
 
   /* USER CODE BEGIN SDIO_Init 0 */
 
@@ -557,8 +516,7 @@ static void MX_SDIO_SD_Init(void)
   * @param None
   * @retval None
   */
-static void MX_SPI1_Init(void)
-{
+static void MX_SPI1_Init(void) {
 
   /* USER CODE BEGIN SPI1_Init 0 */
 
@@ -595,8 +553,7 @@ static void MX_SPI1_Init(void)
   * @param None
   * @retval None
   */
-static void MX_USART1_UART_Init(void)
-{
+static void MX_USART1_UART_Init(void) {
 
   /* USER CODE BEGIN USART1_Init 0 */
 
@@ -628,8 +585,7 @@ static void MX_USART1_UART_Init(void)
   * @param None
   * @retval None
   */
-static void MX_USART6_UART_Init(void)
-{
+static void MX_USART6_UART_Init(void) {
 
   /* USER CODE BEGIN USART6_Init 0 */
 
@@ -661,8 +617,7 @@ static void MX_USART6_UART_Init(void)
   * @param None
   * @retval None
   */
-static void MX_GPIO_Init(void)
-{
+static void MX_GPIO_Init(void) {
   GPIO_InitTypeDef GPIO_InitStruct = {0};
   /* USER CODE BEGIN MX_GPIO_Init_1 */
 
@@ -752,8 +707,7 @@ static void MX_GPIO_Init(void)
   * @brief  This function is executed in case of error occurrence.
   * @retval None
   */
-void Error_Handler(void)
-{
+void Error_Handler(void) {
   /* USER CODE BEGIN Error_Handler_Debug */
   /* User can add his own implementation to report the HAL error return state */
   __disable_irq();
