@@ -1,20 +1,20 @@
 /* USER CODE BEGIN Header */
 /**
-  ******************************************************************************
-  * @file           : main.c
-  * @brief          : Main program body
-  ******************************************************************************
-  * @attention
-  *
-  * Copyright (c) 2026 STMicroelectronics.
-  * All rights reserved.
-  *
-  * This software is licensed under terms that can be found in the LICENSE file
-  * in the root directory of this software component.
-  * If no LICENSE file comes with this software, it is provided AS-IS.
-  *
-  ******************************************************************************
-  */
+ ******************************************************************************
+ * @file           : main.c
+ * @brief          : Main program body
+ ******************************************************************************
+ * @attention
+ *
+ * Copyright (c) 2026 STMicroelectronics.
+ * All rights reserved.
+ *
+ * This software is licensed under terms that can be found in the LICENSE file
+ * in the root directory of this software component.
+ * If no LICENSE file comes with this software, it is provided AS-IS.
+ *
+ ******************************************************************************
+ */
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
@@ -29,31 +29,30 @@
 #include <math.h>
 #include "sd_functions.h"
 #include "HMC5883L.h"
-
-
+#include "telemetria.h"
+#include "LoRa.h"
+#include "BMI270.h"
+#include "filter.h"
+#include "Madgwick_filter.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
-typedef enum{
-	ESTADO_LAUNCHPAD=0,
-	ESTADO_ASCENSO=1,
-	ESTADO_APOGEO=2,//activación de primera etapa de recuperación
-	ESTADO_REEFING_LINE=3, //activación de segunda etapa de recuperación
-	ESTADO_ATERRIZAJE=4
-}EstadoVuelo;
+typedef enum {
+	ESTADO_LAUNCHPAD = 0, ESTADO_ASCENSO = 1, ESTADO_APOGEO = 2, //activación de primera etapa de recuperación
+	ESTADO_REEFING_LINE = 3, //activación de segunda etapa de recuperación
+	ESTADO_ATERRIZAJE = 4
+} EstadoVuelo;
 
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 
-
 //---------Valores de altura predeterminadas
 #define ALTURA_ERROR_BMP 1
 #define ALTURA_DESPEGUE 1
 #define ALTURA_REEFING_LINE 0.5
-
 
 #define I2C_RECOV_SCL_PORT  GPIOB
 #define I2C_RECOV_SCL_PIN   GPIO_PIN_8
@@ -70,6 +69,11 @@ typedef enum{
 #define OFFSET_Y 0
 #define OFFSET_Z 0
 
+#define NSS_GPIO_Port GPIOB
+#define NSS_Pin GPIO_PIN_3
+
+#define RST_GPIO_Port GPIOB
+#define RST_Pin GPIO_PIN_4
 
 /* USER CODE END PD */
 
@@ -92,53 +96,109 @@ SD_HandleTypeDef hsd;
 
 SPI_HandleTypeDef hspi1;
 
+TIM_HandleTypeDef htim6;
+TIM_HandleTypeDef htim12;
+
 UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart6;
 
 /* USER CODE BEGIN PV */
+/*
+ //-----Datos para inicialización-------
+ uint8_t Adress_bmi= 0;
+ uint8_t Estado_inicializacion_bmi= 3;
+
+ //-------------Creacion de objetos ----------
+ BMI270_t bmi270;
+ BiquadFilter filtro_giro;
+
+
+ //---------Arreglo donde se guardaran los bytes para aceleracion y de giroscopio------------
+ uint8_t buffer_datos_bmi[14] = {0};
+
+
+ //-----------lecturas antes de filtrado ---------------
+ float raw_gyro_x;
+ float raw_gyro_y;
+ float raw_gyro_z;
+ volatile int16_t ax_raw = 0;
+ volatile int16_t ay_raw = 0;
+ volatile int16_t az_raw = 0;
+
+ volatile int16_t gx_raw = 0;
+ volatile int16_t gy_raw = 0;
+ volatile int16_t gz_raw = 0;
+
+ volatile float ax_g = 0;
+ volatile float ay_g = 0;
+ volatile float az_g = 0;
+
+ uint8_t tx_bmi[14] = {0};
+ uint8_t rx_bmi[14] = {0};
+ //-------------Contador de lecturas ------------------
+ int contador_lecturas_imu;
+ */
 
 //---lecturas bmp280---------
-float temperatura=0.0f;
-float presion=0.0f; 
-float altura=0.0f;
+float temperatura = 0.0f;
+float presion = 0.0f;
+float altura = 0.0f;
 
 //------------------Calibración --------------------
-float presion_acumulacion=0.0f;
-float presion_calibrada_suelo=0.0f;
+float presion_acumulacion = 0.0f;
+float presion_calibrada_suelo = 0.0f;
 int cont_calibracion_bmp;
 
 //----Variables para calcular altitud --------
 
-
-float presion_nivel_mar=101325.0f;//Este valor esta en pascales
-float altura_nivel_mar=0.0f; //Es la altura en el suelo
-float altura_maxima=0.0f;
+float presion_nivel_mar = 101325.0f; //Este valor esta en pascales
+float altura_nivel_mar = 0.0f; //Es la altura en el suelo
+float altura_maxima = 0.0f;
 
 //------Variables para estados -----------------
 uint32_t tiempo_canal_etapa_1 = 0;
 uint32_t tiempo_canal_etapa_2 = 0;
 
-
-EstadoVuelo estado=ESTADO_LAUNCHPAD;
-
+EstadoVuelo estado = ESTADO_LAUNCHPAD;
 
 //-----------Variables de aceleración-----------------
+//metros por segundo
+float acc_x = 0.0f;
+float acc_y = 0.0f;
+float acc_z = 0.0f;
 
-float acc_x=0.0f;
-float acc_y=0.0f;
-float acc_z=0.0f;
+//grados por segundo
+float gyro_x = 0.0f;
+float gyro_y = 0.0f;
+float gyro_z = 0.0f;
 
-float gyro_x=0.0f;
-float gyro_y=0.0f;
-float gyro_z=0.0f;
+//radianes por segundo
+float gx_rad = 0.0f;
+float gy_rad = 0.0f;
+float gz_rad = 0.0f;
 
-float ang_roll=0.0f;
-float ang_pitch=0.0f;
+//angulos de rotación
+float ang_x = 0.0f;
+float ang_y = 0.0f;
+float ang_z = 0.0f;
 
 //---------------Variables magnetometro----------------
-float mag_x=0.0f;
-float mag_y=0.0f;
-float mag_z=0.0f;
+float mag_x = 0.0f;
+float mag_y = 0.0f;
+float mag_z = 0.0f;
+
+//------------Gravedad vectorial para sacar aceleracion sin gravedad------
+float g_x = 0.0f;
+float g_y = 0.0f;
+float g_z = 0.0f;
+
+//--------------aceleracion sin gravedad --------------------
+float acc_x_sg = 0.0f;
+float acc_y_sg = 0.0f;
+float acc_z_sg = 0.0f;
+
+//-----bandera para leer cada 500 HZ el imu ------------------
+volatile uint8_t imu_500hz = 0;
 
 //---------------Variables de SD---------------
 FATFS SD;
@@ -146,9 +206,10 @@ FIL archivo_vuelo;
 FRESULT archivo_estatus;
 FILINFO fno;
 
-uint8_t bufr[80];//informacion leida
+uint8_t bufr[80]; //informacion leida
 UINT br; //Para bytes leidos
-char header_archivo[]="t_ms,presion,temperatura,altura,altura_max,ax,ay,az,gx,gy,gz,mx,my,mz,v,estado\r\n";
+char header_archivo[] =
+		"t_ms,presion,temperatura,altura,altura_max,ax,ay,az,gx,gy,gz,mx,my,mz,v,estado\r\n";
 char lecturas_archivo[200];
 char nombre_archivo[20];
 int contador_lecturas_guardadas;
@@ -156,8 +217,8 @@ int numero_archivo;
 
 //---------------variables ADC-------------------
 uint32_t adc1;
-float corriente_ch3=0.0f;
-float voltaje_ch3=0.0f;
+float corriente_ch3 = 0.0f;
+float voltaje_ch3 = 0.0f;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -173,20 +234,29 @@ static void MX_SPI1_Init(void);
 static void MX_USART1_UART_Init(void);
 static void MX_USART6_UART_Init(void);
 static void MX_SDIO_SD_Init(void);
+static void MX_TIM6_Init(void);
+static void MX_TIM12_Init(void);
 /* USER CODE BEGIN PFP */
 //-----------------declaración de función recuperación I2C---------------
 void i2c_recover_bus(I2C_HandleTypeDef *hi2c);
 
-
 //-------------Aqui se pondran las funciones creadas--------------
-int __io_putchar(int ch){
+int __io_putchar(int ch) {
 
-  //----UART para debugger -----
-  HAL_UART_Transmit(&huart1,(uint8_t *)&ch,1,0xFFFF);
+	//----UART para debugger -----
+	HAL_UART_Transmit(&huart1, (uint8_t*) &ch, 1, 0xFFFF);
 
-  return ch;
+	return ch;
 
 }
+
+//-------------Interrupción para la lectura de MPU-------------
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim) {
+	if (htim->Instance == TIM6) {
+		imu_500hz = 1;
+	}
+}
+
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -244,282 +314,349 @@ int main(void)
   MX_USART6_UART_Init();
   MX_SDIO_SD_Init();
   MX_FATFS_Init();
+  MX_TIM6_Init();
+  MX_TIM12_Init();
   /* USER CODE BEGIN 2 */
-  hsd.Init.ClockDiv = 10;
+	//hsd.Init.ClockDiv = 10;
+	HAL_TIM_Base_Start_IT(&htim6);
 
-/*
-  //----------------Se inicializa SD------------------
-  if (BSP_SD_Init() != MSD_OK)
-  {
-      printf("Error inicializando SD\r\n");
+	// struct_init(&bmi270, &hspi1, GPIOB, GPIO_PIN_13);
 
-      while (1)
-      {
-          HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_3);
-          HAL_Delay(200);
-      }
-  }
+	/* CS en reposo */
+//   HAL_GPIO_WritePin(bmi270.cs_port, bmi270.cs_pin, GPIO_PIN_SET);
+//   HAL_Delay(10);
+	/* Fuerza selección de interfaz SPI */
+//   SPI_init(&bmi270);
+//   HAL_Delay(10);
+	/* Leer CHIP_ID */
+//   Adress_bmi = read_CHIP_ID(&bmi270);
+//   Estado_inicializacion_bmi = BMI270_init(&bmi270);
+//   uint8_t enable_tx[2] = {0x7D, 0x06};
+//   SPI_Transmit(enable_tx, 2, 100, &bmi270);
+//   HAL_Delay(10);
 
-  //-----------Creación e inicialización de archivo SD------------
-  if(sd_mount()!=FR_OK){
-	  while(1)
-	  	  {
-		  HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_3);
-		  HAL_Delay(200);
-	  	  }
-  }
+//   tx_bmi[0] = 0x0C | 0x80;
+//   for (int i = 1; i < 14; i++)
+//   {
+//       tx_bmi[i] = 0xFF;
+//   }
+	/*lora_hw_t hw = { &hspi1, NSS_GPIO_Port, NSS_Pin, RST_GPIO_Port, RST_Pin };
 
-  //----------Nombre del archivo ----------------------
-	while(1)
-	{
-	    snprintf(nombre_archivo,
-	    		sizeof(nombre_archivo),
-	            "Vuelo%03d.CSV",
-	            numero_archivo);
-	    archivo_estatus=f_stat(nombre_archivo, &fno);
-	    if(archivo_estatus == FR_NO_FILE)
-	    {
-	        break;
-	    }
 
-	    if(archivo_estatus!=FR_OK)
-	    {
-	    	HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_3);
-	    	HAL_Delay(200);
-	    }
 
-	    numero_archivo++;
+	 if (!lora_begin(&hw, LORA_FREQ_HZ)){
+	 while (1) {
+	 *//* no detectado, posible impresion serial o identificador visual*/
+	/*     }
+	 }
+
+	 lora_set_spreading_factor(7);
+	 lora_set_signal_bandwidth(125e3);
+	 lora_set_coding_rate4(8);
+	 lora_set_crc(1);
+	 lora_set_sync_word(0x50);
+	 lora_set_preamble_length(8);
+	 lora_set_tx_power(17, LORA_PA_OUTPUT_PA_BOOST);
+	 *//*
+	 HAL_GPIO_WritePin(GPIOB,GPIO_PIN_14,GPIO_PIN_SET);
+	 HAL_Delay(100);
+	 HAL_GPIO_WritePin(GPIOB,GPIO_PIN_14,GPIO_PIN_RESET);
+	 HAL_Delay(100);
+	 HAL_GPIO_WritePin(GPIOB,GPIO_PIN_14,GPIO_PIN_SET);
+	 HAL_Delay(100);
+	 HAL_GPIO_WritePin(GPIOB,GPIO_PIN_14,GPIO_PIN_RESET);
+	 */
+	 //----------------Se inicializa SD------------------
+	 if (BSP_SD_Init() != MSD_OK)
+	 {
+	 printf("Error inicializando SD\r\n");
+
+	 while (1)
+	 {
+	 HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_3);
+	 HAL_Delay(200);
+	 }
+	 }
+
+	 //-----------Creación e inicialización de archivo SD------------
+	 if(sd_mount()!=FR_OK){
+	 while(1)
+	 {
+	 HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_3);
+	 HAL_Delay(200);
+	 }
+	 }
+
+	 //----------Nombre del archivo ----------------------
+	 while(1)
+	 {
+	 snprintf(nombre_archivo,
+	 sizeof(nombre_archivo),
+	 "Vuelo%03d.CSV",
+	 numero_archivo);
+	 archivo_estatus=f_stat(nombre_archivo, &fno);
+	 if(archivo_estatus == FR_NO_FILE)
+	 {
+	 break;
+	 }
+
+	 if(archivo_estatus!=FR_OK)
+	 {
+	 HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_3);
+	 HAL_Delay(200);
+	 }
+
+	 numero_archivo++;
+	 }
+
+	 //--------------Abrir sesión de datos -----------
+	 if(sd_open_log(nombre_archivo) != FR_OK)
+	 {
+	 while(1)
+	 {
+	 HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_3);
+	 HAL_Delay(200);
+	 }
+	 }
+
+	 //---------------------Se escribe el encabezado ---------------------
+	 if(sd_write_log(header_archivo,&contador_lecturas_guardadas)!=FR_OK)
+	 {
+	 while(1)
+	 {
+	 HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_3);
+	 HAL_Delay(200);
+	 }
+	 }
+	 contador_lecturas_guardadas=0;
+
+
+	//--------Inicialización del BMP280-------------
+	/*Si queremos utilizar I2C*/
+	bmp280.comm_mode = BMP280_MODE_I2C;
+	bmp280.i2c = &hi2c1;
+	bmp280.addr = BMP280_I2C_ADDRESS_0;
+
+	//Si queremos utilizar SPI
+	//bmp280.comm_mode=BMP280_MODE_SPI;
+	//bmp280.spi=&hspi1;
+	//bmp280.cs_port=GPIOB;
+	//bmp280.cs_pin=GPIO_PIN_12;
+	//bmp280_init_default_params(&parametro_bmp280);
+
+	//----- Aqui va el cambio de parametros ----
+	parametro_bmp280.mode = BMP280_MODE_NORMAL;
+	parametro_bmp280.filter = BMP280_FILTER_4;
+	parametro_bmp280.oversampling_pressure = BMP280_HIGH_RES;
+	parametro_bmp280.oversampling_temperature = BMP280_HIGH_RES;
+	parametro_bmp280.standby = BMP280_STANDBY_05;
+
+	//Se inicializa el BMP280
+	while (!bmp280_init(&bmp280, &parametro_bmp280)) {
+		printf("No se dectecto y/o inicializo el BMP280\n");
+		i2c_recover_bus(&hi2c1);
+		//-------recuperar I2C--------------------
 	}
 
-	//--------------Abrir sesión de datos -----------
-	if(sd_open_log(nombre_archivo) != FR_OK)
-	  	{
-	  	    while(1)
-	  	    {
-	  	        HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_3);
-	  	        HAL_Delay(200);
-	  	    }
-	  	}
+	HAL_Delay(100);
 
-	//---------------------Se escribe el encabezado ---------------------
-	if(sd_write_log(header_archivo,&contador_lecturas_guardadas)!=FR_OK)
-	{
-		while(1)
-		  	    {
-		  	        HAL_GPIO_TogglePin(GPIOC, GPIO_PIN_3);
-		  	        HAL_Delay(200);
-		  	    }
+	//----------Se obtiene por primera vez los datos ----------
+	while (!bmp280_read_float(&bmp280, &temperatura, &presion, NULL)) {
+		printf("No se pudieron asignar valores .... BMP280\n");
 	}
-	contador_lecturas_guardadas=0;
 
-*/
+	//----------Se calibra la altura inicial para una mejor lectura ----------
+	while (cont_calibracion_bmp < 100) {
+		bmp280_read_float(&bmp280, &temperatura, &presion, NULL);
+		presion_acumulacion = presion_acumulacion + presion;
+		cont_calibracion_bmp++;
+	}
 
-  //--------Inicialización del BMP280-------------
+	presion_calibrada_suelo = presion_acumulacion
+			/ (float) cont_calibracion_bmp;
 
-  /*Si queremos utilizar I2C*/
-  bmp280.comm_mode=BMP280_MODE_I2C;
-  bmp280.i2c=&hi2c1;
-  bmp280.addr=BMP280_I2C_ADDRESS_0;
+	//----- se calcula la altura con respecto a nivel del mar calibrada --------
+	altura_nivel_mar = CalcularAltura(presion_calibrada_suelo,
+			presion_nivel_mar);
 
+	//-------Condición de seguridad ----------
+	if (isnan(altura_nivel_mar)) {
+		printf(
+				"No se pudo calcular la medida de altura inicial (nivel del mar)\n");
+		Error_Handler();
+	}
 
- //Si queremos utilizar SPI
-  //bmp280.comm_mode=BMP280_MODE_SPI;
-  //bmp280.spi=&hspi1;
-  //bmp280.cs_port=GPIOB;
-  //bmp280.cs_pin=GPIO_PIN_12;
+	//---------------Inicializar los registros de MPU6050 y calibración de giroscopio -------------------------
+	while ((MPU6050_Init(&hi2c1) != HAL_OK)) {
+		printf("No se dectectó el MPU6050");
+		i2c_recover_bus(&hi2c1);
+		//Error_Handler();
+	}
 
-  bmp280_init_default_params(&parametro_bmp280);
+	MPU6050_CalibrateGyro(&hi2c1, &mpu6050);
 
-  //----- Aqui va el cambio de parametros ----
+	//-------------Configuración magnetometro-----------------------------
+	HMC5883L_setOffset(OFFSET_X, OFFSET_Y, OFFSET_Z);
+	HMC5883L_setRange(HMC5883L_RANGE_1_3GA);
+	HMC5883L_setMeasurementMode(HMC5883L_CONTINOUS);
+	HMC5883L_setDataRate(HMC5883L_DATARATE_75HZ);
+	HMC5883L_setSamples(HMC5883L_SAMPLES_8);
 
-  parametro_bmp280.mode = BMP280_MODE_NORMAL;
-  parametro_bmp280.filter = BMP280_FILTER_4;
-  parametro_bmp280.oversampling_pressure = BMP280_HIGH_RES;
-  parametro_bmp280.oversampling_temperature = BMP280_HIGH_RES;
-  parametro_bmp280.standby = BMP280_STANDBY_05;
-
-  //Se inicializa el BMP280
-  while(!bmp280_init(&bmp280, &parametro_bmp280)){
-    printf("No se dectecto y/o inicializo el BMP280\n");
-    i2c_recover_bus(&hi2c1);
-    //-------recuperar I2C--------------------
-  }
-
-  HAL_Delay(100);
-
-
-  //----------Se obtiene por primera vez los datos ----------
-  while(!bmp280_read_float(&bmp280,&temperatura,&presion,NULL)){
-    printf("No se pudieron asignar valores .... BMP280\n");
-    }
-
-
-  //----------Se calibra la altura inicial para una mejor lectura ----------
-  	  while(cont_calibracion_bmp<100){
-	  bmp280_read_float(&bmp280,&temperatura,&presion,NULL);
-	  presion_acumulacion=presion_acumulacion+presion;
-	  cont_calibracion_bmp++;
-  }
-
-  presion_calibrada_suelo=presion;//presion_acumulacion/(float)cont_calibracion_bmp;
-  //----- se calcula la altura con respecto a nivel del mar calibrada --------
-  altura_nivel_mar=CalcularAltura(presion_calibrada_suelo,presion_nivel_mar);
-
-  //-------Condición de seguridad ----------
-  if(isnan(altura_nivel_mar)){
-    printf("No se pudo calcular la medida de altura inicial (nivel del mar)\n");
-    Error_Handler();
-  }
-
-
-  //---------------Inicializar los registros de MPU6050 y calibración de giroscopio -------------------------
-  	while((MPU6050_Init(&hi2c1) !=HAL_OK)){
-      printf("No se dectectó el MPU6050");
-      i2c_recover_bus(&hi2c1);
-      //Error_Handler();
-    }
-    MPU6050_CalibrateGyro(&hi2c1, &mpu6050);
-
-    //-------------Configuración magnetometro-----------------------------
-    HMC5883L_setOffset(OFFSET_X,OFFSET_Y,OFFSET_Z);
-    HMC5883L_setRange(HMC5883L_RANGE_1_3GA);
-    HMC5883L_setMeasurementMode(HMC5883L_CONTINOUS);
-    HMC5883L_setDataRate(HMC5883L_DATARATE_75HZ );
-    HMC5883L_setSamples(HMC5883L_SAMPLES_8);
-
-
-  HAL_GPIO_WritePin(GPIOC,GPIO_PIN_3,GPIO_PIN_SET);
-  HAL_Delay(1000);
-  HAL_GPIO_WritePin(GPIOC,GPIO_PIN_3,GPIO_PIN_RESET);
-  HAL_Delay(1000);
-  HAL_GPIO_WritePin(GPIOC,GPIO_PIN_3,GPIO_PIN_SET);
-  HAL_Delay(1000);
-  HAL_GPIO_WritePin(GPIOC,GPIO_PIN_3,GPIO_PIN_RESET);
-  HAL_Delay(1000);
-
-  
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
-  while (1)
-  {
-
-	MPU6050_ReadAccel(&hi2c1, &mpu6050);
-	MPU6050_ReadGyro(&hi2c1, &mpu6050);
-	MPU6050_ComputeAngles(&mpu6050);
-
-	acc_x=(float)mpu6050.acc_raw[0]/2048.0f * 9.80665f;
-	acc_y=(float)mpu6050.acc_raw[1]/2048.0f * 9.80665f;
-	acc_z=(float)mpu6050.acc_raw[2]/2048.0f * 9.80665f;
-
-	gyro_x=mpu6050.gyro_cal[0];
-	gyro_y=mpu6050.gyro_cal[1];
-	gyro_z=mpu6050.gyro_cal[2];
-
-	ang_pitch=mpu6050.angle_pitch;
-	ang_roll=mpu6050.angle_roll;
-
-    while(!bmp280_read_float(&bmp280,&temperatura,&presion,NULL)){
-      printf("No se pudieron asignar valores .... BMP280\n");
-    }
-
-    altura=CalcularAltura(presion,presion_nivel_mar)-altura_nivel_mar;
-
-    while(isnan(altura))
-    	printf("No se pudo calcular la medida de altura\n");
-
-    if(altura > altura_maxima)
-    	altura_maxima=altura;
-
-    //-------------Obtención de datos del magnetometro-----------
-    magnetometro=HMC5883L_readNormalize();
-    mag_x=magnetometro.XAxis;
-    mag_y=magnetometro.YAxis;
-    mag_z=magnetometro.ZAxis;
-
-    //--------------------medición de corriente----------------
-    HAL_ADC_Start(&hadc1);
-    HAL_ADC_PollForConversion(&hadc1, 10);
-    adc1=HAL_ADC_GetValue(&hadc1);
-    HAL_ADC_Stop(&hadc1);
-
-    //--------------Conversion a corriente-----------
-    voltaje_ch3=adc1*(3.3f/4095.0f);
-    corriente_ch3=(voltaje_cero_ch3-voltaje_ch3)/factor_corriente_voltaje;
+	while (1) {
+		 HAL_GPIO_WritePin(GPIOC,GPIO_PIN_3,GPIO_PIN_SET);
+		 HAL_Delay(1000);
+		 HAL_GPIO_WritePin(GPIOC,GPIO_PIN_3,GPIO_PIN_RESET);
+		 HAL_Delay(1000);
+		 HAL_GPIO_WritePin(GPIOC,GPIO_PIN_3,GPIO_PIN_SET);
+		 HAL_Delay(1000);
+		 HAL_GPIO_WritePin(GPIOC,GPIO_PIN_3,GPIO_PIN_RESET);
+		 HAL_Delay(1000);
 
 
-    //--------------Guarda solo la presion y altura ---------------
- /*   snprintf(lecturas_archivo,
-             sizeof(lecturas_archivo),
-             "%lu,%.2f,%.2f\r\n",
-             HAL_GetTick(),
-             presion,
-             altura);
+		 HAL_TIM_PWM_Start(&htim12, TIM_CHANNEL_1);
+		 HAL_Delay(8000);
+		 HAL_TIM_PWM_Stop(&htim12, TIM_CHANNEL_1);
+		 HAL_Delay(6000);
+		 	 if (imu_500hz) {
+			MPU6050_ReadAccel(&hi2c1, &mpu6050);
+			MPU6050_ReadGyro(&hi2c1, &mpu6050);
 
-    if(sd_write_log(lecturas_archivo,
-                    &contador_lecturas_guardadas) != FR_OK)
-    {
-        printf("Error escribiendo en SD\n");
-    }
-*/
- //----------------------Lógica de vuelo -----------------------------
-    switch(estado)
-    {
-    	case ESTADO_LAUNCHPAD:
-    		if(altura > ALTURA_DESPEGUE){
+			acc_x = (float) mpu6050.acc_raw[1] / 2048.0f * 9.80665f;
+			acc_y = (float) mpu6050.acc_raw[2] / 2048.0f * 9.80665f;
+			acc_z = (float) mpu6050.acc_raw[0] / 2048.0f * 9.80665f;
 
-    			estado=ESTADO_ASCENSO;
-    		}
-    			break;
+			gyro_x = (float) mpu6050.gyro_raw[1] / 16.4f;
+			gyro_y = (float) mpu6050.gyro_raw[2] / 16.4f;
+			gyro_z = (float) mpu6050.gyro_raw[0] / 16.4f;
 
-    	case ESTADO_ASCENSO:
-			//Esto solo es de prueba para anlizarlo posteriormente se debe de quitar para no parar el código
-			  HAL_GPIO_WritePin(GPIOC,GPIO_PIN_3,GPIO_PIN_SET);
-			  HAL_Delay(1000);
-			  HAL_GPIO_WritePin(GPIOC,GPIO_PIN_3,GPIO_PIN_RESET);
-			  HAL_Delay(1000);
+			//------------Se obtiene en radianes por segundo para el filtro----------
+			gx_rad = gyro_x * 0.01745329252f;
+			gy_rad = gyro_y * 0.01745329252f;
+			gz_rad = gyro_z * 0.01745329252f;
 
-			  if(altura <(altura_maxima - ALTURA_ERROR_BMP)){
-				  estado=ESTADO_APOGEO;
-				  HAL_GPIO_WritePin(GPIOB,GPIO_PIN_14,GPIO_PIN_SET);
+			//------------Filtro Madwick para cuaterniones y angulos -----------
+			MadgwickAHRSupdateIMU(gx_rad, gy_rad, gz_rad, acc_x, acc_y, acc_z);
+
+			//--------Obtención de angulos de rotación--------------------
+			computeAngles(); //Variables extern roll, pitch, yaw
+			ang_x = roll;
+			ang_y = pitch;
+			ang_z = yaw;
+
+			//---------Gravedad vectorial para sacar aceleración sin gravedad----------
+			g_x = 2.0f * (q1 * q3 - q0 * q2) * 9.80665f;
+			g_y = 2.0f * (q0 * q1 + q2 * q3) * 9.80665f;
+			g_z = (q0 * q0 - q1 * q1 - q2 * q2 + q3 * q3) * 9.80665f;
+
+			//---------aceleracion sin gravedad -----------------
+			acc_x_sg = acc_x - g_x;
+			acc_y_sg = acc_y - g_y;
+			acc_z_sg = acc_z - g_z;
+		}
+
+		while (!bmp280_read_float(&bmp280, &temperatura, &presion, NULL)) {
+			printf("No se pudieron asignar valores .... BMP280\n");
+		}
+
+		altura = CalcularAltura(presion, presion_nivel_mar) - altura_nivel_mar;
+
+		while (isnan(altura))
+			printf("No se pudo calcular la medida de altura\n");
+
+		if (altura > altura_maxima)
+			altura_maxima = altura;
+
+		//-------------Obtención de datos del magnetometro-----------
+		magnetometro = HMC5883L_readNormalize();
+		mag_x = magnetometro.XAxis;
+		mag_y = magnetometro.YAxis;
+		mag_z = magnetometro.ZAxis;
+		/*
+		 //--------------------medición de corriente----------------
+		 HAL_ADC_Start(&hadc1);
+		 HAL_ADC_PollForConversion(&hadc1, 10);
+		 adc1=HAL_ADC_GetValue(&hadc1);
+		 HAL_ADC_Stop(&hadc1);
+
+		 //--------------Conversion a corriente-----------
+		 voltaje_ch3=adc1*(3.3f/4095.0f);
+		 corriente_ch3=(voltaje_cero_ch3-voltaje_ch3)/factor_corriente_voltaje;
+
+		 //--------------Guarda solo la presion y altura ---------------
+		 snprintf(lecturas_archivo,
+		 sizeof(lecturas_archivo),
+		 "%lu,%.2f,%.2f\r\n",
+		 HAL_GetTick(),
+		 presion,
+		 altura);
+
+		 if(sd_write_log(lecturas_archivo,
+		 &contador_lecturas_guardadas) != FR_OK)
+		 {
+		 printf("Error escribiendo en SD\n");
+		 }
+		 */
+		//----------------------Lógica de vuelo -----------------------------
+		/*  switch(estado)
+		 {
+		 case ESTADO_LAUNCHPAD:
+		 if(altura > ALTURA_DESPEGUE){
+
+		 estado=ESTADO_ASCENSO;
+		 }
+		 break;
+
+		 case ESTADO_ASCENSO:
+		 //Esto solo es de prueba para anlizarlo posteriormente se debe de quitar para no parar el código
+		 HAL_GPIO_WritePin(GPIOC,GPIO_PIN_3,GPIO_PIN_SET);
+		 HAL_Delay(1000);
+		 HAL_GPIO_WritePin(GPIOC,GPIO_PIN_3,GPIO_PIN_RESET);
+		 HAL_Delay(1000);
+
+		 if(altura <(altura_maxima - ALTURA_ERROR_BMP)){
+		 estado=ESTADO_APOGEO;
+		 HAL_GPIO_WritePin(GPIOB,GPIO_PIN_14,GPIO_PIN_SET);
 
 		 //----------se empieza a contar el tiempo para dejar encendido ....etapa 1 ----------
-				  tiempo_canal_etapa_1=HAL_GetTick();
+		 tiempo_canal_etapa_1=HAL_GetTick();
 
-			  }
-    			break;
-    	case ESTADO_APOGEO:
-    		//-------------tiempo de encendido canal 1-----------------
-    		if(HAL_GetTick()-tiempo_canal_etapa_1>=1000){
-    			HAL_GPIO_WritePin(GPIOB,GPIO_PIN_14,GPIO_PIN_RESET);
-    		}
+		 }
+		 break;
+		 case ESTADO_APOGEO:
+		 //-------------tiempo de encendido canal 1-----------------
+		 if(HAL_GetTick()-tiempo_canal_etapa_1>=1000){
+		 HAL_GPIO_WritePin(GPIOB,GPIO_PIN_14,GPIO_PIN_RESET);
+		 }
 
-    		//condición para la reefing line
-    		if(altura<=0.5){
-    			HAL_GPIO_WritePin(GPIOA,GPIO_PIN_3,GPIO_PIN_RESET);//Por si en dado caso no llega a 2km
-    			estado=ESTADO_REEFING_LINE;
-    			HAL_GPIO_WritePin(GPIOA,GPIO_PIN_2,GPIO_PIN_SET);
-     //----------se empieza a contar el tiempo para dejar encendido ....etapa 1 ----------
-    			tiempo_canal_etapa_2=HAL_GetTick();
+		 //condición para la reefing line
+		 if(altura<=0.5){
+		 HAL_GPIO_WritePin(GPIOA,GPIO_PIN_3,GPIO_PIN_RESET);//Por si en dado caso no llega a 2km
+		 estado=ESTADO_REEFING_LINE;
+		 HAL_GPIO_WritePin(GPIOA,GPIO_PIN_2,GPIO_PIN_SET);
+		 //----------se empieza a contar el tiempo para dejar encendido ....etapa 1 ----------
+		 tiempo_canal_etapa_2=HAL_GetTick();
 
-    		}
-    		break;
-    	case ESTADO_REEFING_LINE:
-    		if(HAL_GetTick()-tiempo_canal_etapa_2>=1000){
-    			HAL_GPIO_WritePin(GPIOA,GPIO_PIN_2,GPIO_PIN_RESET);
-    		}
-    		break;
-    	case ESTADO_ATERRIZAJE:
-    		break;
+		 }
+		 break;
+		 case ESTADO_REEFING_LINE:
+		 if(HAL_GetTick()-tiempo_canal_etapa_2>=1000){
+		 HAL_GPIO_WritePin(GPIOA,GPIO_PIN_2,GPIO_PIN_RESET);
+		 }
+		 break;
+		 case ESTADO_ATERRIZAJE:
+		 break;
 
 
-    		}
-    
+		 }
+		 */
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-  }
+	}
   /* USER CODE END 3 */
 }
 
@@ -608,7 +745,7 @@ static void MX_ADC1_Init(void)
 
   /** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time.
   */
-  sConfig.Channel = ADC_CHANNEL_9;
+  sConfig.Channel = ADC_CHANNEL_4;
   sConfig.Rank = 1;
   sConfig.SamplingTime = ADC_SAMPLETIME_3CYCLES;
   if (HAL_ADC_ConfigChannel(&hadc1, &sConfig) != HAL_OK)
@@ -618,7 +755,7 @@ static void MX_ADC1_Init(void)
 
   /** Configures for the selected ADC injected channel its corresponding rank in the sequencer and its sample time
   */
-  sConfigInjected.InjectedChannel = ADC_CHANNEL_9;
+  sConfigInjected.InjectedChannel = ADC_CHANNEL_4;
   sConfigInjected.InjectedRank = 1;
   sConfigInjected.InjectedNbrOfConversion = 1;
   sConfigInjected.InjectedSamplingTime = ADC_SAMPLETIME_3CYCLES;
@@ -779,7 +916,7 @@ static void MX_I2C1_Init(void)
 
   /* USER CODE END I2C1_Init 1 */
   hi2c1.Instance = I2C1;
-  hi2c1.Init.ClockSpeed = 100000;
+  hi2c1.Init.ClockSpeed = 400000;
   hi2c1.Init.DutyCycle = I2C_DUTYCYCLE_2;
   hi2c1.Init.OwnAddress1 = 0;
   hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
@@ -853,6 +990,8 @@ static void MX_SDIO_SD_Init(void)
   hsd.Init.BusWide = SDIO_BUS_WIDE_1B;
   hsd.Init.HardwareFlowControl = SDIO_HARDWARE_FLOW_CONTROL_DISABLE;
   hsd.Init.ClockDiv = 0;
+
+  hsd.Init.BusWide=SDIO_BUS_WIDE_4B;
   /* USER CODE BEGIN SDIO_Init 2 */
 
   /* USER CODE END SDIO_Init 2 */
@@ -894,6 +1033,86 @@ static void MX_SPI1_Init(void)
   /* USER CODE BEGIN SPI1_Init 2 */
 
   /* USER CODE END SPI1_Init 2 */
+
+}
+
+/**
+  * @brief TIM6 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM6_Init(void)
+{
+
+  /* USER CODE BEGIN TIM6_Init 0 */
+
+  /* USER CODE END TIM6_Init 0 */
+
+  TIM_MasterConfigTypeDef sMasterConfig = {0};
+
+  /* USER CODE BEGIN TIM6_Init 1 */
+
+  /* USER CODE END TIM6_Init 1 */
+  htim6.Instance = TIM6;
+  htim6.Init.Prescaler = 83;
+  htim6.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim6.Init.Period = 65535;
+  htim6.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_Base_Init(&htim6) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sMasterConfig.MasterOutputTrigger = TIM_TRGO_RESET;
+  sMasterConfig.MasterSlaveMode = TIM_MASTERSLAVEMODE_DISABLE;
+  if (HAL_TIMEx_MasterConfigSynchronization(&htim6, &sMasterConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM6_Init 2 */
+
+  /* USER CODE END TIM6_Init 2 */
+
+}
+
+/**
+  * @brief TIM12 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_TIM12_Init(void)
+{
+
+  /* USER CODE BEGIN TIM12_Init 0 */
+
+  /* USER CODE END TIM12_Init 0 */
+
+  TIM_OC_InitTypeDef sConfigOC = {0};
+
+  /* USER CODE BEGIN TIM12_Init 1 */
+
+  /* USER CODE END TIM12_Init 1 */
+  htim12.Instance = TIM12;
+  htim12.Init.Prescaler = 83;
+  htim12.Init.CounterMode = TIM_COUNTERMODE_UP;
+  htim12.Init.Period = 999;
+  htim12.Init.ClockDivision = TIM_CLOCKDIVISION_DIV1;
+  htim12.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
+  if (HAL_TIM_PWM_Init(&htim12) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  sConfigOC.OCMode = TIM_OCMODE_PWM1;
+  sConfigOC.Pulse = 0;
+  sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
+  sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
+  if (HAL_TIM_PWM_ConfigChannel(&htim12, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN TIM12_Init 2 */
+
+  /* USER CODE END TIM12_Init 2 */
+  HAL_TIM_MspPostInit(&htim12);
 
 }
 
@@ -989,8 +1208,8 @@ static void MX_GPIO_Init(void)
   HAL_GPIO_WritePin(GPIOA, GPIO_PIN_2|GPIO_PIN_3, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12|GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15
-                          |GPIO_PIN_3|GPIO_PIN_4, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_12|GPIO_PIN_13|GPIO_PIN_15|GPIO_PIN_3
+                          |GPIO_PIN_4, GPIO_PIN_RESET);
 
   /*Configure GPIO pins : PC13 PC3 */
   GPIO_InitStruct.Pin = GPIO_PIN_13|GPIO_PIN_3;
@@ -1018,10 +1237,10 @@ static void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(GPIOB, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : PB12 PB13 PB14 PB15
-                           PB3 PB4 */
-  GPIO_InitStruct.Pin = GPIO_PIN_12|GPIO_PIN_13|GPIO_PIN_14|GPIO_PIN_15
-                          |GPIO_PIN_3|GPIO_PIN_4;
+  /*Configure GPIO pins : PB12 PB13 PB15 PB3
+                           PB4 */
+  GPIO_InitStruct.Pin = GPIO_PIN_12|GPIO_PIN_13|GPIO_PIN_15|GPIO_PIN_3
+                          |GPIO_PIN_4;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -1052,99 +1271,89 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-void i2c_recover_bus(I2C_HandleTypeDef *hi2c)
-{
-    GPIO_InitTypeDef gpio = {0};
+void i2c_recover_bus(I2C_HandleTypeDef *hi2c) {
+	GPIO_InitTypeDef gpio = { 0 };
 
-    /* 1. Desactivar I2C */
-    HAL_I2C_DeInit(hi2c);
+	/* 1. Desactivar I2C */
+	HAL_I2C_DeInit(hi2c);
 
-    /* 2. Habilitar reloj del GPIO */
-    __HAL_RCC_GPIOB_CLK_ENABLE();
+	/* 2. Habilitar reloj del GPIO */
+	__HAL_RCC_GPIOB_CLK_ENABLE();
 
-    /* 3. SCL y SDA como GPIO Open Drain */
-    gpio.Mode  = GPIO_MODE_OUTPUT_OD;
-    gpio.Pull  = GPIO_NOPULL;
-    gpio.Speed = GPIO_SPEED_FREQ_LOW;
+	/* 3. SCL y SDA como GPIO Open Drain */
+	gpio.Mode = GPIO_MODE_OUTPUT_OD;
+	gpio.Pull = GPIO_NOPULL;
+	gpio.Speed = GPIO_SPEED_FREQ_LOW;
 
-    gpio.Pin = I2C_RECOV_SCL_PIN;
-    HAL_GPIO_Init(I2C_RECOV_SCL_PORT, &gpio);
+	gpio.Pin = I2C_RECOV_SCL_PIN;
+	HAL_GPIO_Init(I2C_RECOV_SCL_PORT, &gpio);
 
-    gpio.Pin = I2C_RECOV_SDA_PIN;
-    HAL_GPIO_Init(I2C_RECOV_SDA_PORT, &gpio);
+	gpio.Pin = I2C_RECOV_SDA_PIN;
+	HAL_GPIO_Init(I2C_RECOV_SDA_PORT, &gpio);
 
-    /* Liberar bus */
-    HAL_GPIO_WritePin(I2C_RECOV_SCL_PORT,
-                      I2C_RECOV_SCL_PIN,
-                      GPIO_PIN_SET);
+	/* Liberar bus */
+	HAL_GPIO_WritePin(I2C_RECOV_SCL_PORT,
+	I2C_RECOV_SCL_PIN, GPIO_PIN_SET);
 
-    HAL_GPIO_WritePin(I2C_RECOV_SDA_PORT,
-                      I2C_RECOV_SDA_PIN,
-                      GPIO_PIN_SET);
+	HAL_GPIO_WritePin(I2C_RECOV_SDA_PORT,
+	I2C_RECOV_SDA_PIN, GPIO_PIN_SET);
 
-    HAL_Delay(1);
+	HAL_Delay(1);
 
-    /* 4. Hasta 9 pulsos de SCL */
-    for (int i = 0; i < 9; i++)
-    {
-        /* Si SDA ya está libre, terminar */
-        if (HAL_GPIO_ReadPin(I2C_RECOV_SDA_PORT,
-                             I2C_RECOV_SDA_PIN) == GPIO_PIN_SET)
-        {
-            break;
-        }
+	/* 4. Hasta 9 pulsos de SCL */
+	for (int i = 0; i < 9; i++) {
+		/* Si SDA ya está libre, terminar */
+		if (HAL_GPIO_ReadPin(I2C_RECOV_SDA_PORT,
+		I2C_RECOV_SDA_PIN) == GPIO_PIN_SET) {
+			break;
+		}
 
-        /* SCL LOW */
-        HAL_GPIO_WritePin(I2C_RECOV_SCL_PORT,
-                          I2C_RECOV_SCL_PIN,
-                          GPIO_PIN_RESET);
+		/* SCL LOW */
+		HAL_GPIO_WritePin(I2C_RECOV_SCL_PORT,
+		I2C_RECOV_SCL_PIN, GPIO_PIN_RESET);
 
-        HAL_Delay(1);
+		HAL_Delay(1);
 
-        /* SCL HIGH */
-        HAL_GPIO_WritePin(I2C_RECOV_SCL_PORT,
-                          I2C_RECOV_SCL_PIN,
-                          GPIO_PIN_SET);
+		/* SCL HIGH */
+		HAL_GPIO_WritePin(I2C_RECOV_SCL_PORT,
+		I2C_RECOV_SCL_PIN, GPIO_PIN_SET);
 
-        HAL_Delay(1);
-    }
+		HAL_Delay(1);
+	}
 
-    /* 5. Generar STOP:
-       SDA LOW -> SCL HIGH -> SDA HIGH
-    */
+	/* 5. Generar STOP:
+	 SDA LOW -> SCL HIGH -> SDA HIGH
+	 */
 
-    HAL_GPIO_WritePin(I2C_RECOV_SDA_PORT,
-                      I2C_RECOV_SDA_PIN,
-                      GPIO_PIN_RESET);
+	HAL_GPIO_WritePin(I2C_RECOV_SDA_PORT,
+	I2C_RECOV_SDA_PIN, GPIO_PIN_RESET);
 
-    HAL_Delay(1);
+	HAL_Delay(1);
 
-    HAL_GPIO_WritePin(I2C_RECOV_SCL_PORT,
-                      I2C_RECOV_SCL_PIN,
-                      GPIO_PIN_SET);
+	HAL_GPIO_WritePin(I2C_RECOV_SCL_PORT,
+	I2C_RECOV_SCL_PIN, GPIO_PIN_SET);
 
-    HAL_Delay(1);
+	HAL_Delay(1);
 
-    HAL_GPIO_WritePin(I2C_RECOV_SDA_PORT,
-                      I2C_RECOV_SDA_PIN,
-                      GPIO_PIN_SET);
+	HAL_GPIO_WritePin(I2C_RECOV_SDA_PORT,
+	I2C_RECOV_SDA_PIN, GPIO_PIN_SET);
 
-    HAL_Delay(1);
+	HAL_Delay(1);
 
-    /* 6. Regresar pines a Alternate Function I2C */
-    gpio.Mode      = GPIO_MODE_AF_OD;
-    gpio.Pull      = GPIO_NOPULL;
-    gpio.Speed     = GPIO_SPEED_FREQ_VERY_HIGH;
-    gpio.Alternate = GPIO_AF4_I2C1;
+	/* 6. Regresar pines a Alternate Function I2C */
+	gpio.Mode = GPIO_MODE_AF_OD;
+	gpio.Pull = GPIO_NOPULL;
+	gpio.Speed = GPIO_SPEED_FREQ_VERY_HIGH;
+	gpio.Alternate = GPIO_AF4_I2C1;
 
-    gpio.Pin = I2C_RECOV_SCL_PIN;
-    HAL_GPIO_Init(I2C_RECOV_SCL_PORT, &gpio);
+	gpio.Pin = I2C_RECOV_SCL_PIN;
+	HAL_GPIO_Init(I2C_RECOV_SCL_PORT, &gpio);
 
-    gpio.Pin = I2C_RECOV_SDA_PIN;
-    HAL_GPIO_Init(I2C_RECOV_SDA_PORT, &gpio);
+	gpio.Pin = I2C_RECOV_SDA_PIN;
+	HAL_GPIO_Init(I2C_RECOV_SDA_PORT, &gpio);
 
-    /* 7. Reiniciar periférico I2C */
-    HAL_I2C_Init(hi2c);
+	/* 7. Reiniciar periférico I2C */
+	HAL_I2C_Init(hi2c);
 }
 /* USER CODE END 4 */
 
@@ -1155,11 +1364,10 @@ void i2c_recover_bus(I2C_HandleTypeDef *hi2c)
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
-  /* User can add his own implementation to report the HAL error return state */
-  __disable_irq();
-  while (1)
-  {
-  }
+	/* User can add his own implementation to report the HAL error return state */
+	__disable_irq();
+	while (1) {
+	}
   /* USER CODE END Error_Handler_Debug */
 }
 #ifdef USE_FULL_ASSERT

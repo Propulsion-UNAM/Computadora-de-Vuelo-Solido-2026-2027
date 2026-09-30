@@ -48,12 +48,17 @@ target_sources(${CMAKE_PROJECT_NAME} PRIVATE
 ./Core/Src/sd_functions.c
 ./Core/Src/mpu6050.c
 ./Core/Src/HMC5883L.c
+Drivers/LoRa/Src/lora.c
+./Core/Src/BMI270.c
+./Core/Src/filter.c
+./Core/Src/Madgwick_filter.c
     # Add user sources here
 )
 
 # Add include paths
 target_include_directories(${CMAKE_PROJECT_NAME} PRIVATE
 ./Core/Inc/
+Drivers/LoRa/Inc
     # Add user defined include paths
 )
 # Add project symbols (macros)
@@ -78,3 +83,6 @@ target_link_libraries(${CMAKE_PROJECT_NAME}
 
     # Add user defined libraries
 )
+
+
+

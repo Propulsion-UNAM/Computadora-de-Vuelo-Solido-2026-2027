@@ -16,6 +16,17 @@ HAL_StatusTypeDef MPU6050_Init(I2C_HandleTypeDef *hi2c)
     if (HAL_I2C_Mem_Write(hi2c, MPU6050_ADDR, MPU6050_REG_FILTER, 1, &data, 1, HAL_MAX_DELAY) != HAL_OK)
         return HAL_ERROR;
 
+    // Sample Rate = 1000 / (1 + 1) = 500 Hz
+    data = 0x01;
+    if (HAL_I2C_Mem_Write(hi2c,
+                          MPU6050_ADDR,
+                          MPU6050_REG_SMPLRT_DIV,
+                          1,
+                          &data,
+                          1,
+                          HAL_MAX_DELAY) != HAL_OK)
+        return HAL_ERROR;
+
 
     // Gyro config ±2000 dps
     data = 0x18;
@@ -57,21 +68,50 @@ void MPU6050_CalibrateGyro(I2C_HandleTypeDef *hi2c, MPU6050_t *mpu)
 void MPU6050_ReadAccel(I2C_HandleTypeDef *hi2c, MPU6050_t *mpu)
 {
     uint8_t buf[6];
-    HAL_I2C_Mem_Read(hi2c, MPU6050_ADDR, MPU6050_REG_ACCEL_XOUT_H, 1, buf, 6, HAL_MAX_DELAY);
 
-    mpu->acc_raw[0] = (buf[0] << 8) | buf[1];
-    mpu->acc_raw[1] = (buf[2] << 8) | buf[3];
-    mpu->acc_raw[2] = (buf[4] << 8) | buf[5];
+    if (HAL_I2C_Mem_Read(hi2c,
+                         MPU6050_ADDR,
+                         MPU6050_REG_ACCEL_XOUT_H,
+                         1,
+                         buf,
+                         6,
+                         HAL_MAX_DELAY) != HAL_OK)
+    {
+        return;
+    }
+
+    mpu->acc_raw[0] =
+        (int16_t)(((uint16_t)buf[0] << 8) | buf[1]);
+
+    mpu->acc_raw[1] =
+        (int16_t)(((uint16_t)buf[2] << 8) | buf[3]);
+
+    mpu->acc_raw[2] =
+        (int16_t)(((uint16_t)buf[4] << 8) | buf[5]);
 }
 
 void MPU6050_ReadGyro(I2C_HandleTypeDef *hi2c, MPU6050_t *mpu)
 {
     uint8_t buf[6];
-    HAL_I2C_Mem_Read(hi2c, MPU6050_ADDR, MPU6050_REG_GYRO_XOUT_H, 1, buf, 6, HAL_MAX_DELAY);
 
-    mpu->gyro_raw[0] = ((buf[0] << 8) | buf[1]) - mpu->gyro_cal[0];
-    mpu->gyro_raw[1] = ((buf[2] << 8) | buf[3]) - mpu->gyro_cal[1];
-    mpu->gyro_raw[2] = ((buf[4] << 8) | buf[5]) - mpu->gyro_cal[2];
+    if (HAL_I2C_Mem_Read(hi2c,
+                         MPU6050_ADDR,
+                         MPU6050_REG_GYRO_XOUT_H,
+                         1,
+                         buf,
+                         6,
+                         HAL_MAX_DELAY) != HAL_OK)
+    {
+        return;
+    }
+
+    int16_t gx = (int16_t)(((uint16_t)buf[0] << 8) | buf[1]);
+    int16_t gy = (int16_t)(((uint16_t)buf[2] << 8) | buf[3]);
+    int16_t gz = (int16_t)(((uint16_t)buf[4] << 8) | buf[5]);
+
+    mpu->gyro_raw[0] = gx - mpu->gyro_cal[0];
+    mpu->gyro_raw[1] = gy - mpu->gyro_cal[1];
+    mpu->gyro_raw[2] = gz - mpu->gyro_cal[2];
 }
 
 void MPU6050_ReadTemp(I2C_HandleTypeDef *hi2c, MPU6050_t *mpu)
