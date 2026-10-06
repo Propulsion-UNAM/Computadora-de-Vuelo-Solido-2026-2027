@@ -1,0 +1,7 @@
+../Core/Src/BMI270.c:444:6:struct_init	2
+../Core/Src/BMI270.c:486:6:SPI_init	1
+../Core/Src/BMI270.c:499:9:read_CHIP_ID	1
+../Core/Src/BMI270.c:506:6:SPI_Transmit	1
+../Core/Src/BMI270.c:514:6:SPI_Recive	1
+../Core/Src/BMI270.c:523:6:BMI270_gyro_calibrate	2
+../Core/Src/BMI270.c:576:9:BMI270_init	8
