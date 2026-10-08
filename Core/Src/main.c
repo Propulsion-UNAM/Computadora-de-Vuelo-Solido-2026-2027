@@ -59,7 +59,7 @@ typedef enum {
 /* USER CODE BEGIN PD */
 
 //---------Valores de altura predeterminadas para seguridad
-#define ALTURA_ERROR_BMP 4
+#define ALTURA_ERROR_BMP 10
 #define ALTURA_DESPEGUE 10
 #define ALTURA_REEFING_LINE 500
 
@@ -80,15 +80,22 @@ typedef enum {
 #define OFFSET_Z 0
 
 //------------Prueba aspiradora ---------------------
-#define aspiradora 0
+#define aspiradora 1
 
 //------------Calibración de sensores --------------
 
 //Placa 2
 //----------Calibración ------------------------
-#define BIAS_ACC_X   (-0.3216f)
-#define BIAS_ACC_Y   (-1.0885f)
-#define BIAS_ACC_Z   ( 0.6007f)
+#define BIAS_ACC_X_1   (0.0f)
+#define BIAS_ACC_Y_1   (0.0f)
+#define BIAS_ACC_Z_1   ( 0.0f)
+
+#define BIAS_ACC_X_2   (-0.3216f)
+#define BIAS_ACC_Y_2   (-1.0885f)
+#define BIAS_ACC_Z_2   ( 0.6007f)
+
+
+#define FRECUENCIA_MPU (0.003333333f)
 
 
 /* USER CODE END PD */
@@ -136,6 +143,8 @@ int pwm_activo =0; //para ver si todavia se esta mandando la señal pwm
 int cont_aterrizaje=0;//Contar hasta que aterriza
 int bandera=1;
 
+int aterrizaje_condiciones=0;
+
 //-----------Variables de aceleración-----------------
 //metros por segundo
 float acc_x = 0.0f;
@@ -176,6 +185,7 @@ float acc_z_sg = 0.0f;
 volatile uint8_t imu_300hz = 0;
 volatile uint8_t sd_300hz = 0;
 
+
 //---------------Variables de SD---------------
 FATFS SD;
 FIL archivo_vuelo;
@@ -190,6 +200,16 @@ char lecturas_archivo[200];
 char nombre_archivo[20];
 int contador_lecturas_guardadas;
 int numero_archivo;
+char buffer_sd[4096];
+uint32_t buffer_sd_len = 0;
+
+
+//variables a quitar solo estan para analizar si hay algun error en el guardado de datos
+volatile uint32_t sd_muestras = 0;
+volatile uint32_t sd_escrituras = 0;
+int ultimo_len = 0;
+FRESULT ultimo_error_sd = FR_OK;
+
 
 //-------------Variables filtro Kalman --------------------
 uint8_t bandera_kalman = 0;
@@ -204,7 +224,10 @@ float modulo_acc = 0.0f;
 
 uint32_t tiempo_bmp = 0;
 uint32_t tiempo_mag = 0;
+uint32_t tiempo_aterrizaje = 0;
 
+
+//vARIABLES AUXILIARES PARA VER DE CUANTO ES NUESTRA FRECUENCIA PARA EL FILTRO - despues se quitarám
 volatile uint32_t tim6_total = 0;
 uint32_t contador_madgwick = 0;
 
@@ -217,16 +240,6 @@ uint32_t tim6_anterior = 0;
 uint32_t madgwick_anterior = 0;
 
 
-char buffer_sd[4096];
-uint32_t buffer_sd_len = 0;
-
-
-//variables a quitar
-volatile uint32_t sd_muestras = 0;
-volatile uint32_t sd_escrituras = 0;
-
-int ultimo_len = 0;
-FRESULT ultimo_error_sd = FR_OK;
 
 
 uint32_t tiempo_sync = 0;
@@ -260,6 +273,10 @@ void inicializarSD();
 
 //---------------inicilizar BMP --------------------
 void inicializarBMP();
+
+//----------------Inicializar MPU ------------------
+void inicializarMPU();
+
 
 void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim){
 	//-------------Interrupción para la lectura de MPU-------------
@@ -422,7 +439,9 @@ int main(void)
 //-------------------inicializar BMP ----------------------
   inicializarBMP();
 
+  //------------inicializar MPU ----------------------
 
+  inicializarMPU();
 
  	//-------------Configuración magnetometro-----------------------------
  	HMC5883L_setOffset(OFFSET_X, OFFSET_Y, OFFSET_Z);
@@ -458,9 +477,9 @@ int main(void)
 	  	acc_z = (float) mpu6050.acc_raw[0] / 2048.0f * 9.80665f;
 
 	  	//-------------Correcciones que se obtuvieron por datos ----------------
-	  	acc_x = acc_x - BIAS_ACC_X_2;
-	  	acc_y = acc_y - BIAS_ACC_Y_2;
-	  	acc_z = acc_z - BIAS_ACC_Z_2;
+	  	acc_x = acc_x - BIAS_ACC_X_1;
+	  	acc_y = acc_y - BIAS_ACC_Y_1;
+	  	acc_z = acc_z - BIAS_ACC_Z_1;
 
 	  	gyro_x = (float) mpu6050.gyro_raw[1] / 16.4f;
 	  	gyro_y = (float) mpu6050.gyro_raw[2] / 16.4f;
@@ -473,7 +492,6 @@ int main(void)
 
 	  	//------------Filtro Madwick para cuaterniones y angulos -----------
 	  	MadgwickAHRSupdateIMU(gx_rad, gy_rad, gz_rad, acc_x, acc_y, acc_z);
-
 	  	contador_madgwick++; //--------------contador para ver si son los 300Hz------------
 
 	  	//--------Obtención de angulos de rotación--------------------
@@ -482,7 +500,7 @@ int main(void)
 	  	ang_y = pitch;
 	  	ang_z = yaw;
 
-	  	//---------Gravedad vectorial para sacar aceleración sin gravedad----------
+	  	//---------Gravedad vectorial para sacar aceleración sin gravedad con madwick----------
 	  	g_x = 2.0f*(q1*q3-q0*q2)*9.80665f;
 	  	g_y = 2.0f*(q0*q1+q2*q3)*9.80665f;
 	  	g_z = (q0*q0-q1* q1-q2 * q2+q3 *q3) * 9.80665f;
@@ -514,14 +532,14 @@ int main(void)
 
 	  	//-----------Predicción kalman --------------
 	  	if (bandera_kalman){
-	  		Kalman_Predict(&kalman,acc_vertical,0.003333333f);
+	  		Kalman_Predict(&kalman,acc_vertical,FRECUENCIA_MPU);
 	  		velocidad_vertical = kalman.velocidad;
 	  		altura_kalman = kalman.altura;
 	  	 }
 	  	}
 
 	  //------------------Almacenamiento de datos
-	  if (sd_300hz){
+	    if (sd_300hz){
 	  	sd_300hz = 0;
 	  	int len = snprintf(lecturas_archivo,sizeof(lecturas_archivo),"%lu,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,"
 	  		        "%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%d,%d,%d\r\n",
@@ -593,8 +611,8 @@ int main(void)
 	  }
 
 
-	 //-----------------Función auxiliar para debuggear el filtrado ---------------
-	 if ((HAL_GetTick() - tiempo_hz) >= 1000){
+	 //-----------------Función auxiliar para debuggear el filtrado y ver a cuanta frecuencia llega ---------------
+/*	 if ((HAL_GetTick() - tiempo_hz) >= 1000){
 		 int32_t ahora = HAL_GetTick();
 		 uint32_t dt = ahora - tiempo_hz;
 
@@ -610,7 +628,7 @@ int main(void)
 
 	  	 tiempo_hz = ahora;
 	 }
-
+*/
 
 
 	//-------------Obtención de altura máxima ------------------
@@ -658,7 +676,99 @@ int main(void)
 
 
     /*Insertar logica de vuelo aqui */
+    if(aspiradora){
+    //----------------------Lógica de vuelo -----------------------------
+    	switch(estado){
+    		case ESTADO_LAUNCHPAD:
+    			if(altura > ALTURA_DESPEGUE){
+    /*			 HAL_GPIO_WritePin(GPIOC,GPIO_PIN_3,GPIO_PIN_SET);
+    			 HAL_Delay(1000);
+    			 HAL_GPIO_WritePin(GPIOC,GPIO_PIN_3,GPIO_PIN_RESET);
+    			 HAL_Delay(1000);
+    */			 estado=ESTADO_ASCENSO;
+    		 }
+    		 break;
+    		case ESTADO_ASCENSO:
+    		 //Esto solo es de prueba para anlizarlo posteriormente se debe de quitar para no parar el código
+    /*		 HAL_GPIO_WritePin(GPIOC,GPIO_PIN_3,GPIO_PIN_SET);
+    		 HAL_Delay(1000);
+    		 HAL_GPIO_WritePin(GPIOC,GPIO_PIN_3,GPIO_PIN_RESET);
+    		 HAL_Delay(1000);
 
+    */		 	if(altura <(altura_maxima - ALTURA_ERROR_BMP)){
+    				estado=ESTADO_APOGEO;
+    				HAL_TIM_PWM_Start(&htim12, TIM_CHANNEL_1);
+    				pwm_activo = 1;
+    				//----------se empieza a contar el tiempo para dejar encendido ....etapa 1 ----------
+    				tiempo_canal_etapa_1=HAL_GetTick();
+
+    		 	 }
+    		 break;
+
+
+    		case ESTADO_APOGEO:
+
+    			 //-------------tiempo de encendido canal 1-----------------
+    			 if(HAL_GetTick()-tiempo_canal_etapa_1>=4000 && pwm_activo==1){
+    				 HAL_TIM_PWM_Stop(&htim12, TIM_CHANNEL_1);
+    				 pwm_activo = 0;
+    			 }
+
+
+    		 //condición para la reefing line
+    		 if(altura<=ALTURA_REEFING_LINE){
+    			 estado=ESTADO_REEFING_LINE;
+    			 HAL_GPIO_WritePin(GPIOA,GPIO_PIN_3,GPIO_PIN_SET);
+    			 //----------se empieza a contar el tiempo para dejar encendido ....etapa 1 ----------
+    			 tiempo_canal_etapa_2=HAL_GetTick();
+
+    		 }
+    		 break;
+
+
+    		 case ESTADO_REEFING_LINE:
+
+    		 if(pwm_activo==1 && HAL_GetTick()-tiempo_canal_etapa_1>=4000){
+    				 HAL_TIM_PWM_Stop(&htim12, TIM_CHANNEL_1);
+    				 pwm_activo=0;
+    				 aterrizaje_condiciones=1;
+    				 tiempo_aterrizaje=HAL_GetTick();
+    	      }
+
+    		 if(HAL_GetTick()-tiempo_canal_etapa_2>=1000){
+    		 HAL_GPIO_WritePin(GPIOA,GPIO_PIN_3,GPIO_PIN_RESET);
+    		 	 if(aterrizaje_condiciones==1){
+    		 		aterrizaje_condiciones=2;
+    		 	 }
+    		 }
+
+    		 if(abs(altura-altura_anterior)<1){
+    			 cont_aterrizaje++;
+    		 }else{
+    			 cont_aterrizaje--;
+    		 }
+
+    		 if(cont_aterrizaje>=10000 && aterrizaje_condiciones==2 && (HAL_GetTick()-tiempo_aterrizaje)>=180000){
+    			 estado=ESTADO_ATERRIZAJE;
+    		 }
+    		 break;
+
+    		 case ESTADO_ATERRIZAJE:
+    			 	if(bandera){
+    				HAL_TIM_Base_Start_IT(&htim7);
+    				bandera=0;
+    				tiempo_buzzer_aterrizaje=HAL_GetTick();
+    			 	}
+
+    			 	if(HAL_GetTick()-tiempo_buzzer_aterrizaje>=100000){
+    				HAL_TIM_Base_Stop_IT(&htim7);
+    			 	}
+    		 break;
+
+
+    		 }
+    		 }
+    		 altura_anterior=altura;
 
   }
   /* USER CODE END 3 */
@@ -725,7 +835,7 @@ static void MX_I2C1_Init(void)
 
   /* USER CODE END I2C1_Init 1 */
   hi2c1.Instance = I2C1;
-  hi2c1.Init.ClockSpeed = 400000;
+  hi2c1.Init.ClockSpeed = 100000;
   hi2c1.Init.DutyCycle = I2C_DUTYCYCLE_2;
   hi2c1.Init.OwnAddress1 = 0;
   hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
@@ -765,14 +875,6 @@ static void MX_SDIO_SD_Init(void)
   hsd.Init.BusWide = SDIO_BUS_WIDE_1B;
   hsd.Init.HardwareFlowControl = SDIO_HARDWARE_FLOW_CONTROL_DISABLE;
   hsd.Init.ClockDiv = 0;
-
-  if (HAL_SD_Init(&hsd) != HAL_OK){
-      Error_Handler();
-  }
-
-  if (HAL_SD_ConfigWideBusOperation(&hsd,SDIO_BUS_WIDE_4B) != HAL_OK){
-      Error_Handler();
-  }
   /* USER CODE BEGIN SDIO_Init 2 */
   hsd.Init.ClockDiv = 20;
   /* USER CODE END SDIO_Init 2 */
@@ -873,9 +975,9 @@ static void MX_TIM7_Init(void)
 
   /* USER CODE END TIM7_Init 1 */
   htim7.Instance = TIM7;
-  htim7.Init.Prescaler = 83;
+  htim7.Init.Prescaler = 20;
   htim7.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim7.Init.Period = 65535;
+  htim7.Init.Period = 999;
   htim7.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim7) != HAL_OK)
   {
@@ -952,7 +1054,7 @@ static void MX_TIM12_Init(void)
     Error_Handler();
   }
   sConfigOC.OCMode = TIM_OCMODE_PWM1;
-  sConfigOC.Pulse = 0;
+  sConfigOC.Pulse = 250;
   sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
   sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
   if (HAL_TIM_PWM_ConfigChannel(&htim12, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
@@ -1160,6 +1262,16 @@ void inicializarBMP(){
 	 	}
 }
 
+//---------------Inicializar los registros de MPU6050 y calibración de giroscopio -------------------------
+void inicializarMPU(){
+		while ((MPU6050_Init(&hi2c1) != HAL_OK)) {
+			printf("No se dectectó el MPU6050");
+			i2c_recover_bus(&hi2c1);
+			//Error_Handler();
+		}
+
+		MPU6050_CalibrateGyro(&hi2c1, &mpu6050);
+}
 
 void i2c_recover_bus(I2C_HandleTypeDef *hi2c) {
 	GPIO_InitTypeDef gpio = { 0 };
