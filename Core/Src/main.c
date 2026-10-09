@@ -185,6 +185,10 @@ float acc_z_sg = 0.0f;
 volatile uint8_t imu_300hz = 0;
 volatile uint8_t sd_300hz = 0;
 
+//-------Bandera de confirmación de Despegue---------
+int confirmacion_despegue = 0;
+int despegue;
+
 
 //---------------Variables de SD---------------
 FATFS SD;
@@ -587,6 +591,12 @@ int main(void)
 	  	}
 	 }
 
+
+	 //--------Activación de Bandera de Estado de DESPEGUE--------
+	 if (altura > ALTURA_DESPEGUE && confirmacion_despegue == 0) {
+		 confirmacion_despegue = 1;
+	     }
+
 	 //---------------Se lee magnetometro cada 20 Hz -------------------
 	 if(HAL_GetTick()-tiempo_mag>=20){
 
@@ -649,7 +659,8 @@ int main(void)
 	tel.MagZ=mag_z;
 	tel.VelX=velocidad_vertical;
 	tel.Presion=presion;
-    /* USER CODE END WHILE */
+  tel.confirmacion_despegue=despegue; 	
+  /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
    if (dio0_irq) {			/* -> on_tx_done() */

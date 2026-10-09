@@ -18,6 +18,7 @@ typedef struct __attribute__((packed)) {
   float    MagZ;
   float    VelX;
   float    Presion;
+  int 	   confirmacion_despegue;
 } telemetria_t;
 
 #endif
