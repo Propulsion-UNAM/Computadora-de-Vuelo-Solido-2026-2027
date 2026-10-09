@@ -10,8 +10,8 @@
 ../Core/Src/sd_functions.c:194:9:sd_create_directory	24	static
 ../Core/Src/sd_functions.c:200:6:sd_list_directory_recursive	232	static
 ../Core/Src/sd_functions.c:232:6:sd_list_files	8	static
-../Core/Src/sd_functions.c:242:9:sd_open_log	24	static
-../Core/Src/sd_functions.c:254:9:sd_write_log	32	static
-../Core/Src/sd_functions.c:292:9:sd_write_buffer	24	static
-../Core/Src/sd_functions.c:319:9:sd_sync	8	static
-../Core/Src/sd_functions.c:325:9:sd_close_log	8	static
+../Core/Src/sd_functions.c:240:9:sd_open_log	24	static
+../Core/Src/sd_functions.c:252:9:sd_write_log	32	static
+../Core/Src/sd_functions.c:288:9:sd_write_buffer	24	static
+../Core/Src/sd_functions.c:314:9:sd_sync	8	static
+../Core/Src/sd_functions.c:320:9:sd_close_log	8	static

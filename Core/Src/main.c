@@ -60,7 +60,8 @@ typedef enum {
 
 //---------Valores de altura predeterminadas para seguridad
 #define ALTURA_ERROR_BMP 10
-#define ALTURA_DESPEGUE 10
+#define ALTURA_DESPEGUE 100
+#define DETECCION_DESPEGUE 9
 #define ALTURA_REEFING_LINE 500
 
 //----------------------Constantes --------------------
@@ -84,7 +85,7 @@ typedef enum {
 
 //------------Calibración de sensores --------------
 
-//Placa 2
+
 //----------Calibración ------------------------
 #define BIAS_ACC_X_1   (0.0f)
 #define BIAS_ACC_Y_1   (0.0f)
@@ -95,7 +96,7 @@ typedef enum {
 #define BIAS_ACC_Z_2   ( 0.6007f)
 
 
-#define FRECUENCIA_MPU (0.003333333f)
+#define FRECUENCIA_MPU (0.008333333f)
 
 
 /* USER CODE END PD */
@@ -124,10 +125,12 @@ float temperatura = 0.0f;
 float presion = 0.0f;
 float altura = 0.0f;
 
+
 //------------------Calibración inicial en el main  --------------------
 float presion_acumulacion = 0.0f;
 float presion_calibrada_suelo = 0.0f;
 int cont_calibracion_bmp;
+
 
 //----Variables para calcular altitud --------
 
@@ -136,7 +139,8 @@ float altura_maxima = 0.0f;
 float altura_anterior=0.0f;
 
 //------Variables para estados -----------------
-uint32_t tiempo_canal_etapa_1 = 0;
+uint32_t tiempo_canal_nicromel_etapa_1 = 0;
+uint32_t tiempo_canal_ematch_etapa_1 =0;
 uint32_t tiempo_canal_etapa_2 = 0;
 uint32_t tiempo_buzzer_aterrizaje=0;
 int pwm_activo =0; //para ver si todavia se esta mandando la señal pwm
@@ -186,8 +190,7 @@ volatile uint8_t imu_300hz = 0;
 volatile uint8_t sd_300hz = 0;
 
 //-------Bandera de confirmación de Despegue---------
-int confirmacion_despegue = 0;
-int despegue;
+int DESPEGUE = 0;
 
 
 //---------------Variables de SD---------------
@@ -198,8 +201,7 @@ FILINFO fno;
 
 uint8_t bufr[80]; //informacion leida
 UINT br; //Para bytes leidos
-char header_archivo[] =
-		"t_ms,presion,temperatura,altura,altura_max,ax,ay,az,asgx, asgy, asgz, gx, gy,gz, angx, angy, angz,mx,my,mz,v,act1, act2, estado\r\n";
+char header_archivo[] ="t_ms,presion,temperatura,altura,altura_max,ax,ay,az,asgx, asgy, asgz, gx, gy,gz, angx, angy, angz,mx,my,mz,v,act1, act2, estado\r\n";
 char lecturas_archivo[200];
 char nombre_archivo[20];
 int contador_lecturas_guardadas;
@@ -207,17 +209,18 @@ int numero_archivo;
 char buffer_sd[4096];
 uint32_t buffer_sd_len = 0;
 
-
-//variables a quitar solo estan para analizar si hay algun error en el guardado de datos
+//variables a quitar
 volatile uint32_t sd_muestras = 0;
 volatile uint32_t sd_escrituras = 0;
+
 int ultimo_len = 0;
 FRESULT ultimo_error_sd = FR_OK;
 
 
+
 //-------------Variables filtro Kalman --------------------
 uint8_t bandera_kalman = 0;
-uint16_t contador_estable = 0;//necesario porque la aceleración sin gravedad tarda en converger
+uint16_t contador_estable_velocidad = 0;//necesario porque la aceleración sin gravedad tarda en converger
 float error_acc_sg = 0.0f;
 float acc_vertical = 0.0f;
 float velocidad_vertical = 0.0f;
@@ -481,9 +484,9 @@ int main(void)
 	  	acc_z = (float) mpu6050.acc_raw[0] / 2048.0f * 9.80665f;
 
 	  	//-------------Correcciones que se obtuvieron por datos ----------------
-	  	acc_x = acc_x - BIAS_ACC_X_1;
-	  	acc_y = acc_y - BIAS_ACC_Y_1;
-	  	acc_z = acc_z - BIAS_ACC_Z_1;
+	  	acc_x = acc_x - BIAS_ACC_X_2;
+	  	acc_y = acc_y - BIAS_ACC_Y_2;
+	  	acc_z = acc_z - BIAS_ACC_Z_2;
 
 	  	gyro_x = (float) mpu6050.gyro_raw[1] / 16.4f;
 	  	gyro_y = (float) mpu6050.gyro_raw[2] / 16.4f;
@@ -505,9 +508,7 @@ int main(void)
 	  	ang_z = yaw;
 
 	  	//---------Gravedad vectorial para sacar aceleración sin gravedad con madwick----------
-	  	g_x = 2.0f*(q1*q3-q0*q2)*9.80665f;
-	  	g_y = 2.0f*(q0*q1+q2*q3)*9.80665f;
-	  	g_z = (q0*q0-q1* q1-q2 * q2+q3 *q3) * 9.80665f;
+	  	computeGravity(&g_x,&g_y,&g_z);
 
 	  	//---------aceleracion sin gravedad -----------------
 	  	acc_x_sg = acc_x - g_x;
@@ -516,13 +517,15 @@ int main(void)
 
 	  	acc_vertical_medida =(acc_x*g_x + acc_y*g_y + acc_z*g_z)/ 9.80665f;
 	  	acc_vertical =acc_vertical_medida-9.80665f;
+
+	  	//------------se calcula el módulo para analizar convergencia ------------------
 	  	error_acc_sg = sqrtf(acc_x_sg*acc_x_sg+acc_y_sg*acc_y_sg+acc_z_sg*acc_z_sg);
 
 	  	//------------bandera para que a partir de la convergencia de la aceleración se active kalman ----------
 	  	if (!bandera_kalman){
 	  		if (error_acc_sg < 0.5f){
-	  			contador_estable++;
-	  		if (contador_estable >= 500){
+	  			contador_estable_velocidad++;
+	  		if (contador_estable_velocidad >= 500){
 	  			Kalman_Init(&kalman);
 	  			kalman.altura = altura;
 	  			kalman.velocidad = 0.0f;
@@ -531,7 +534,7 @@ int main(void)
 	  			}
 	  		}
 	  		else
-	  			contador_estable = 0;
+	  			contador_estable_velocidad = 0;
 	  	}
 
 	  	//-----------Predicción kalman --------------
@@ -542,37 +545,101 @@ int main(void)
 	  	 }
 	  	}
 
-	  //------------------Almacenamiento de datos
-	    if (sd_300hz){
-	  	sd_300hz = 0;
-	  	int len = snprintf(lecturas_archivo,sizeof(lecturas_archivo),"%lu,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,"
-	  		        "%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%d,%d,%d\r\n",
+	  if (sd_300hz)
+	  		{
+	  		    sd_300hz = 0;
+	  	        int len = snprintf(
+	  		        lecturas_archivo,
+	  		        sizeof(lecturas_archivo),
 
-	  		       HAL_GetTick(),presion,temperatura,altura,altura_maxima,acc_x,acc_y,acc_z,acc_x_sg,acc_y_sg,
-	  		       acc_z_sg,gyro_x,gyro_y,gyro_z,ang_x,ang_y,ang_z,mag_x,mag_y,mag_z,velocidad_vertical, 0,0,estado);
+	  		        "%lu,"
+	  		        "%.4f,%.4f,%.4f,%.4f,"
+	  		        "%.4f,%.4f,%.4f,"
+	  		        "%.4f,%.4f,%.4f,"
+	  		        "%.4f,%.4f,%.4f,"
+	  		        "%.4f,%.4f,%.4f,"
+	  		        "%.4f,%.4f,%.4f,"
+	  		        "%.4f,"
+	  		        "%d,%d,%d\r\n",
 
-	  	//----------------Alacenamiento en buffer para no escribir en la SD muchas veces ----------------
-	  	if (len > 0 && len < sizeof(lecturas_archivo)){
-	  		if (buffer_sd_len + len < sizeof(buffer_sd)){
-	  			memcpy(&buffer_sd[buffer_sd_len],lecturas_archivo,len);
-	  			buffer_sd_len += len;
+	  		        HAL_GetTick(),
+
+	  		        presion,
+	  		        temperatura,
+	  		        altura,
+	  		        altura_maxima,
+
+	  		        acc_x,
+	  		        acc_y,
+	  		        acc_z,
+
+	  		        acc_x_sg,
+	  		        acc_y_sg,
+	  		        acc_z_sg,
+
+	  				gyro_x,
+	  				gyro_y,
+	  				gyro_z,
+
+	  		        ang_x,
+	  		        ang_y,
+	  		        ang_z,
+
+	  		        mag_x,
+	  		        mag_y,
+	  		        mag_z,
+
+	  		        velocidad_vertical,
+
+	  		        0,
+	  		        0,
+	  		        estado
+	  		    );
+
+	  		    ultimo_len = len;
+	  		    sd_muestras++;
+
+	  		    if (len > 0 && len < sizeof(lecturas_archivo))
+	  		    {
+	  		        if (buffer_sd_len + len < sizeof(buffer_sd))
+	  		        {
+	  		            memcpy(&buffer_sd[buffer_sd_len],
+	  		                   lecturas_archivo,
+	  		                   len);
+
+	  		            buffer_sd_len += len;
+	  		        }
+	  		    }
+
+	  		    if (buffer_sd_len > 512)
+	  		    {
+
+	  		        ultimo_error_sd =
+	  		            sd_write_buffer(buffer_sd, buffer_sd_len);
+
+	  		        if (ultimo_error_sd == FR_OK)
+	  		        {
+	  		            sd_escrituras++;
+	  		            buffer_sd_len = 0;
+	  		        }
+
+	  		    }
 	  		}
-	  	}
+
+
+
 
 	  	//----------------Se escribe cada que supera ese almacenamiento---------------
 	    if (buffer_sd_len > 512){
-
-	    	ultimo_error_sd =sd_write_buffer(buffer_sd, buffer_sd_len);
-	  		if (ultimo_error_sd == FR_OK){
-	  		            sd_escrituras++;
+	    	sd_write_buffer(buffer_sd, buffer_sd_len);
+	  		if (archivo_estatus == FR_OK){
 	  		            buffer_sd_len = 0;
 	  		 }
 
 	  	}
-	}
 
-	 //----------------Lee el bmp a 25 Hz --------------
-	 if(HAL_GetTick()-tiempo_bmp >= 40){
+	 //----------------Lee el bmp a 50 Hz --------------
+	 if(HAL_GetTick()-tiempo_bmp >= 20){
 
 	  	tiempo_bmp=HAL_GetTick();
 
@@ -593,11 +660,11 @@ int main(void)
 
 
 	 //--------Activación de Bandera de Estado de DESPEGUE--------
-	 if (altura > ALTURA_DESPEGUE && confirmacion_despegue == 0) {
-		 confirmacion_despegue = 1;
+	 if (altura > DETECCION_DESPEGUE && DESPEGUE == 0) {
+		 DESPEGUE = 1;
 	     }
 
-	 //---------------Se lee magnetometro cada 20 Hz -------------------
+	 //---------------Se lee magnetometro cada 50 Hz -------------------
 	 if(HAL_GetTick()-tiempo_mag>=20){
 
 	  	tiempo_mag=HAL_GetTick();
@@ -616,13 +683,13 @@ int main(void)
 
 	  	 FRESULT res_sync = sd_sync();
 	  	 if (res_sync != FR_OK){
-	  		ultimo_error_sd = res_sync;
+	  		archivo_estatus = res_sync;
 	  	}
 	  }
 
 
 	 //-----------------Función auxiliar para debuggear el filtrado y ver a cuanta frecuencia llega ---------------
-/*	 if ((HAL_GetTick() - tiempo_hz) >= 1000){
+	/* if ((HAL_GetTick() - tiempo_hz) >= 1000){
 		 int32_t ahora = HAL_GetTick();
 		 uint32_t dt = ahora - tiempo_hz;
 
@@ -639,12 +706,6 @@ int main(void)
 	  	 tiempo_hz = ahora;
 	 }
 */
-
-
-	//-------------Obtención de altura máxima ------------------
-	if (altura > altura_maxima)
-	   altura_maxima = altura;
-
 	//--------------------Actualización de datos por telemetria -----------------
 	tel.t_ms = HAL_GetTick();
 	tel.Altitud=altura;
@@ -659,8 +720,8 @@ int main(void)
 	tel.MagZ=mag_z;
 	tel.VelX=velocidad_vertical;
 	tel.Presion=presion;
-  tel.confirmacion_despegue=despegue; 	
-  /* USER CODE END WHILE */
+    tel.confirmacion_despegue=DESPEGUE; 	
+    /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
    if (dio0_irq) {			/* -> on_tx_done() */
@@ -686,50 +747,50 @@ int main(void)
     }
 
 
+	//-------------Obtención de altura máxima ------------------
+	if (altura > altura_maxima)
+	   altura_maxima = altura;
+
     /*Insertar logica de vuelo aqui */
     if(aspiradora){
     //----------------------Lógica de vuelo -----------------------------
     	switch(estado){
     		case ESTADO_LAUNCHPAD:
     			if(altura > ALTURA_DESPEGUE){
-    /*			 HAL_GPIO_WritePin(GPIOC,GPIO_PIN_3,GPIO_PIN_SET);
-    			 HAL_Delay(1000);
-    			 HAL_GPIO_WritePin(GPIOC,GPIO_PIN_3,GPIO_PIN_RESET);
-    			 HAL_Delay(1000);
-    */			 estado=ESTADO_ASCENSO;
-    		 }
+    				estado=ESTADO_ASCENSO;
+    			}
     		 break;
     		case ESTADO_ASCENSO:
-    		 //Esto solo es de prueba para anlizarlo posteriormente se debe de quitar para no parar el código
-    /*		 HAL_GPIO_WritePin(GPIOC,GPIO_PIN_3,GPIO_PIN_SET);
-    		 HAL_Delay(1000);
-    		 HAL_GPIO_WritePin(GPIOC,GPIO_PIN_3,GPIO_PIN_RESET);
-    		 HAL_Delay(1000);
-
-    */		 	if(altura <(altura_maxima - ALTURA_ERROR_BMP)){
+    			if(altura <(altura_maxima - ALTURA_ERROR_BMP)){
     				estado=ESTADO_APOGEO;
     				HAL_TIM_PWM_Start(&htim12, TIM_CHANNEL_1);
     				pwm_activo = 1;
+    				HAL_GPIO_WritePin(GPIOA,GPIO_PIN_3,GPIO_PIN_SET);
     				//----------se empieza a contar el tiempo para dejar encendido ....etapa 1 ----------
-    				tiempo_canal_etapa_1=HAL_GetTick();
+    				tiempo_canal_ematch_etapa_1=HAL_GetTick();
+    				//----------se empieza a contar el tiempo para dejar encendido ambos canales....etapa 1 ----------
+    				tiempo_canal_nicromel_etapa_1=HAL_GetTick();
 
     		 	 }
     		 break;
 
 
     		case ESTADO_APOGEO:
-
-    			 //-------------tiempo de encendido canal 1-----------------
-    			 if(HAL_GetTick()-tiempo_canal_etapa_1>=4000 && pwm_activo==1){
+    			 //-------------tiempo de encendido canal 1 nicromel-----------------
+    			 if(HAL_GetTick()-tiempo_canal_nicromel_etapa_1>=4000 && pwm_activo==1){
     				 HAL_TIM_PWM_Stop(&htim12, TIM_CHANNEL_1);
     				 pwm_activo = 0;
     			 }
 
+    			 //------------tiempo de encendido canal 1 ematch ------------------
+    			 if(HAL_GetTick()-tiempo_canal_etapa_2>=1000){
+    			     HAL_GPIO_WritePin(GPIOA,GPIO_PIN_3,GPIO_PIN_RESET);
+    			 }
 
     		 //condición para la reefing line
     		 if(altura<=ALTURA_REEFING_LINE){
     			 estado=ESTADO_REEFING_LINE;
-    			 HAL_GPIO_WritePin(GPIOA,GPIO_PIN_3,GPIO_PIN_SET);
+    			 HAL_GPIO_WritePin(GPIOA,GPIO_PIN_2,GPIO_PIN_SET);
     			 //----------se empieza a contar el tiempo para dejar encendido ....etapa 1 ----------
     			 tiempo_canal_etapa_2=HAL_GetTick();
 
@@ -739,7 +800,7 @@ int main(void)
 
     		 case ESTADO_REEFING_LINE:
 
-    		 if(pwm_activo==1 && HAL_GetTick()-tiempo_canal_etapa_1>=4000){
+    		 if(pwm_activo==1 && HAL_GetTick()-tiempo_canal_nicromel_etapa_1>=4000){
     				 HAL_TIM_PWM_Stop(&htim12, TIM_CHANNEL_1);
     				 pwm_activo=0;
     				 aterrizaje_condiciones=1;
@@ -747,32 +808,40 @@ int main(void)
     	      }
 
     		 if(HAL_GetTick()-tiempo_canal_etapa_2>=1000){
-    		 HAL_GPIO_WritePin(GPIOA,GPIO_PIN_3,GPIO_PIN_RESET);
+    		 HAL_GPIO_WritePin(GPIOA,GPIO_PIN_2,GPIO_PIN_RESET);
     		 	 if(aterrizaje_condiciones==1){
     		 		aterrizaje_condiciones=2;
     		 	 }
     		 }
 
+			 //------------tiempo de encendido canal 1 ematch ------------------
+			 if(HAL_GetTick()-tiempo_canal_etapa_2>=1000){
+			     HAL_GPIO_WritePin(GPIOA,GPIO_PIN_3,GPIO_PIN_RESET);
+			     if(aterrizaje_condiciones==2){
+			         aterrizaje_condiciones=3;
+			     }
+			 }
+
     		 if(abs(altura-altura_anterior)<1){
     			 cont_aterrizaje++;
-    		 }else{
+    		 }else
     			 cont_aterrizaje--;
-    		 }
 
-    		 if(cont_aterrizaje>=10000 && aterrizaje_condiciones==2 && (HAL_GetTick()-tiempo_aterrizaje)>=180000){
+    		 if(cont_aterrizaje>=10000 && aterrizaje_condiciones==3 && (HAL_GetTick()-tiempo_aterrizaje)>=30000){
     			 estado=ESTADO_ATERRIZAJE;
     		 }
     		 break;
 
     		 case ESTADO_ATERRIZAJE:
     			 	if(bandera){
-    				HAL_TIM_Base_Start_IT(&htim7);
-    				bandera=0;
-    				tiempo_buzzer_aterrizaje=HAL_GetTick();
+    			 		sd_close_log();
+    			 		HAL_TIM_Base_Start_IT(&htim7);
+    			 		bandera=0;
+    			 		tiempo_buzzer_aterrizaje=HAL_GetTick();
     			 	}
 
     			 	if(HAL_GetTick()-tiempo_buzzer_aterrizaje>=100000){
-    				HAL_TIM_Base_Stop_IT(&htim7);
+    			 		HAL_TIM_Base_Stop_IT(&htim7);
     			 	}
     		 break;
 
@@ -802,10 +871,11 @@ void SystemClock_Config(void)
   /** Initializes the RCC Oscillators according to the specified parameters
   * in the RCC_OscInitTypeDef structure.
   */
-  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
-  RCC_OscInitStruct.HSEState = RCC_HSE_ON;
+  RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSI;
+  RCC_OscInitStruct.HSIState = RCC_HSI_ON;
+  RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
-  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSE;
+  RCC_OscInitStruct.PLL.PLLSource = RCC_PLLSOURCE_HSI;
   RCC_OscInitStruct.PLL.PLLM = 8;
   RCC_OscInitStruct.PLL.PLLN = 168;
   RCC_OscInitStruct.PLL.PLLP = RCC_PLLP_DIV2;
@@ -846,7 +916,7 @@ static void MX_I2C1_Init(void)
 
   /* USER CODE END I2C1_Init 1 */
   hi2c1.Instance = I2C1;
-  hi2c1.Init.ClockSpeed = 100000;
+  hi2c1.Init.ClockSpeed = 400000;
   hi2c1.Init.DutyCycle = I2C_DUTYCYCLE_2;
   hi2c1.Init.OwnAddress1 = 0;
   hi2c1.Init.AddressingMode = I2C_ADDRESSINGMODE_7BIT;
@@ -887,7 +957,16 @@ static void MX_SDIO_SD_Init(void)
   hsd.Init.HardwareFlowControl = SDIO_HARDWARE_FLOW_CONTROL_DISABLE;
   hsd.Init.ClockDiv = 0;
   /* USER CODE BEGIN SDIO_Init 2 */
-  hsd.Init.ClockDiv = 20;
+  hsd.Init.ClockDiv = 40;
+
+  hsd.Init.BusWide = SDIO_BUS_WIDE_1B;
+  	  if(HAL_SD_Init(&hsd)!= HAL_OK){
+  	    Error_Handler();
+  	  }
+
+  	  if(HAL_SD_ConfigWideBusOperation(&hsd,SDIO_BUS_WIDE_4B)!= HAL_OK){
+  	    Error_Handler();
+  	  }
   /* USER CODE END SDIO_Init 2 */
 
 }
@@ -986,9 +1065,9 @@ static void MX_TIM7_Init(void)
 
   /* USER CODE END TIM7_Init 1 */
   htim7.Instance = TIM7;
-  htim7.Init.Prescaler = 20;
+  htim7.Init.Prescaler = 83;
   htim7.Init.CounterMode = TIM_COUNTERMODE_UP;
-  htim7.Init.Period = 999;
+  htim7.Init.Period = 249;
   htim7.Init.AutoReloadPreload = TIM_AUTORELOAD_PRELOAD_DISABLE;
   if (HAL_TIM_Base_Init(&htim7) != HAL_OK)
   {
@@ -1065,7 +1144,7 @@ static void MX_TIM12_Init(void)
     Error_Handler();
   }
   sConfigOC.OCMode = TIM_OCMODE_PWM1;
-  sConfigOC.Pulse = 250;
+  sConfigOC.Pulse = 0;
   sConfigOC.OCPolarity = TIM_OCPOLARITY_HIGH;
   sConfigOC.OCFastMode = TIM_OCFAST_DISABLE;
   if (HAL_TIM_PWM_ConfigChannel(&htim12, &sConfigOC, TIM_CHANNEL_1) != HAL_OK)
@@ -1093,7 +1172,6 @@ static void MX_GPIO_Init(void)
 
   /* GPIO Ports Clock Enable */
   __HAL_RCC_GPIOC_CLK_ENABLE();
-  __HAL_RCC_GPIOH_CLK_ENABLE();
   __HAL_RCC_GPIOA_CLK_ENABLE();
   __HAL_RCC_GPIOB_CLK_ENABLE();
   __HAL_RCC_GPIOD_CLK_ENABLE();
@@ -1227,6 +1305,7 @@ void inicializarBMP(){
 	 	bmp280.i2c = &hi2c1;
 	 	bmp280.addr = BMP280_I2C_ADDRESS_0;
 
+	 	bmp280_init_default_params(&parametro_bmp280);
 	 	//Si queremos utilizar SPI
 	 /*	bmp280.comm_mode=BMP280_MODE_SPI;
 	 	bmp280.spi=&hspi1;
@@ -1237,8 +1316,7 @@ void inicializarBMP(){
 	 	//----- Aqui va el cambio de parametros ----
 	 	parametro_bmp280.mode = BMP280_MODE_NORMAL;
 	 	parametro_bmp280.filter = BMP280_FILTER_4;
-	 	parametro_bmp280.oversampling_pressure = BMP280_HIGH_RES;
-	 	parametro_bmp280.oversampling_temperature = BMP280_HIGH_RES;
+	 	//parametro_bmp280.oversampling_pressure = BMP280_HIGH_RES;
 	 	parametro_bmp280.standby = BMP280_STANDBY_05;
 
 	 	//----------------Inicialización de  BMP280---------------

@@ -2,3 +2,4 @@
 ../Core/Src/Madgwick_filter.c:143:6:MadgwickAHRSupdateIMU	120	static
 ../Core/Src/Madgwick_filter.c:218:7:invSqrt	40	static
 ../Core/Src/Madgwick_filter.c:244:6:computeAngles	8	static
+../Core/Src/Madgwick_filter.c:254:6:computeGravity	24	static

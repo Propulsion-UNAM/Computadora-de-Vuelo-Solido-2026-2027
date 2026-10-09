@@ -21,7 +21,7 @@
 //---------------------------------------------------------------------------------------------------
 // Definitions
 
-#define sampleFreq	300.0f		// sample frequency in Hz
+#define sampleFreq	120.0f		// sample frequency in Hz
 #define betaDef		0.1f		// 2 * proportional gain
 
 //---------------------------------------------------------------------------------------------------
@@ -248,6 +248,14 @@ void computeAngles()
 	if (fabs(-2.0f * (q1*q3 - q0*q2)) >= 1)
 		pitch = copysign(M_PI / 2, -2.0f * (q1*q3 - q0*q2)) * R2D; // use 90 degrees if out of range
 	yaw = atan2f(q1*q2 + q0*q3, 0.5f - q2*q2 - q3*q3) * R2D;
+}
+
+
+void computeGravity(float *gx, float *gy, float *gz ){
+
+	*gx = 2.0f*(q1*q3-q0*q2)*9.80665f;
+	*gy = 2.0f*(q0*q1+q2*q3)*9.80665f;
+	*gz = (q0*q0-q1* q1-q2 * q2+q3 *q3) * 9.80665f;
 }
 //====================================================================================================
 // END OF CODE

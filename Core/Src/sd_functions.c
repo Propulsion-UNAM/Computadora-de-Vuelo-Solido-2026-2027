@@ -237,8 +237,6 @@ void sd_list_files(void) {
 }
 
 
-/// FUNCIONES PROPIAS PARA GUARDAS CSV EN LA CV//
-
 FRESULT sd_open_log(const char *filename)
 {
     FRESULT res;
@@ -258,14 +256,12 @@ FRESULT sd_write_log(const char *text, int *cont)
 
     FRESULT res = f_write(&logFile, text, len, &bw);
 
-    // Mostrar el error REAL de f_write()
     if (res != FR_OK)
     {
         error_led(res);
         return res;
     }
 
-    // f_write dijo OK, pero escribió menos bytes
     if (bw != len)
     {
         error_led(5);
@@ -309,7 +305,6 @@ FRESULT sd_write_buffer(const char *data, UINT len)
 
     if (res != FR_OK)
     {
-        error_led(6);
         return res;
     }
 

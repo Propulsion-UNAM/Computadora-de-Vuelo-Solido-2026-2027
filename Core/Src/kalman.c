@@ -22,9 +22,9 @@ void Kalman_Init(KalmanVertical_t *kf)
     kf->P[2][2] = 0.1f;
 
     //parametros de ruido
-    kf->sigma_acc  = 0.5f;   // [m/s^2]
+    kf->sigma_acc  = 0.3f;   // [m/s^2]
     kf->sigma_bias = 0.01f;  // variacion del bias
-    kf->R_baro     = 1.0f;   // varianza de altura [m^2]
+    kf->R_baro     = 2.0f;   // varianza de altura [m^2]
 }
 
 //---------Prediccion se ejecuta cada lectura del MPU ----------------
@@ -190,8 +190,6 @@ void Kalman_UpdateBaro(KalmanVertical_t *kf,float altura_bmp){
         }
     }
 
-
-    // Guardar nueva matriz P
     for(int i = 0; i < 3; i++)
     {
         for(int j = 0; j < 3; j++)
