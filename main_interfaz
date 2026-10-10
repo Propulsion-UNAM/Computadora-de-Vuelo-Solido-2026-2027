@@ -1,0 +1,344 @@
+#include "cyRETCODE.h"
+#include "elements/cyGauge.h"
+#include "elements/cyRealtimePlot.h"
+#include "functions.h"
+#include "cyUI.h"
+#include "serial_cpp/serial.h"
+
+#include <cmath>
+#include <exception>
+#include <imgui.h>
+
+#include <iostream>
+#include <sstream>
+#include <map>
+#include <string>
+#include <vector>
+
+long long count = 0;
+
+// La interfaz acepta DOS formatos de línea por serial:
+//
+// 1) Receptora LoRa (formato "clave=valor", separado por espacios).
+//    Campos de telemetria_t (telemetria.h), en el orden del printf:
+//
+//    t=12345 Alt=-0.41 Acc=-0.07,9.64,-9.72 Gyr=-0.06,0.00,0.00
+//    Mag=0.00,-0.92,10.12 VelX=0.00 Presion=77534.41
+//
+//    t       t_ms (ms)
+//    Alt     Altitud (m)
+//    Acc     AccX,AccY,AccZ  (m/s², SUPOSICIÓN: telemetria.h no indica unidades)
+//    Gyr     GyrX,GyrY,GyrZ
+//    Mag     MagX,MagY,MagZ
+//    VelX    VelX (m/s)
+//    Presion Presion (Pa)
+//
+// 2) Conexión directa por USB (CSV, prueba de la foto):
+//
+//    millis, Altitud, AccX, AccY, AccZ, GyrX, GyrY, GyrZ, MagX, MagY, MagZ, VelX, Presión
+//
+// Los dos se convierten a las mismas claves y actualizan las mismas gráficas.
+// Las aceleraciones se convierten de m/s² a g.
+// Si el tiempo no llega o vale 0, se usa el tiempo de la Cyberdeck.
+
+static const float G = 9.81f;
+
+typedef std::map<std::string, std::vector<float>> Campos;
+
+// Convierte "1.2,3.4,5.6" en {1.2, 3.4, 5.6}. Devuelve false si algún
+// valor no es un número válido.
+static bool leerNumeros(const std::string& texto, std::vector<float>& out)
+{
+  out.clear();
+  std::stringstream ss(texto);
+  std::string parte;
+  while (std::getline(ss, parte, ','))
+  {
+    try
+    {
+      size_t usados = 0;
+      float v = std::stof(parte, &usados);
+      if (usados == 0 || !std::isfinite(v)) return false;
+      out.push_back(v);
+    }
+    catch (const std::exception&)
+    {
+      return false;
+    }
+  }
+  return !out.empty();
+}
+
+// Formato de la receptora LoRa: "clave=valor clave=v1,v2,v3 ..."
+static Campos leerClaveValor(const std::string& line)
+{
+  Campos c;
+  std::stringstream ss(line);
+  std::string tok;
+  while (ss >> tok)
+  {
+    size_t eq = tok.find('=');
+    if (eq == std::string::npos || eq == 0) continue;
+    std::vector<float> vals;
+    if (leerNumeros(tok.substr(eq + 1), vals))
+    {
+      c[tok.substr(0, eq)] = vals;
+    }
+  }
+  return c;
+}
+
+// Formato CSV de la prueba por USB, convertido a las mismas claves
+static Campos leerCSV(const std::string& line)
+{
+  Campos c;
+  std::vector<float> v;
+  std::stringstream ss(line);
+  std::string elem;
+  while (std::getline(ss, elem, ','))
+  {
+    std::vector<float> uno;
+    if (!leerNumeros(elem, uno)) break;   // parar en el primer valor no numérico
+    v.push_back(uno[0]);
+  }
+  if (v.size() > 0)  c["t"]       = {v[0]};
+  if (v.size() > 1)  c["Alt"]     = {v[1]};
+  if (v.size() > 4)  c["Acc"]     = {v[2], v[3], v[4]};
+  if (v.size() > 7)  c["Gyr"]     = {v[5], v[6], v[7]};
+  if (v.size() > 10) c["Mag"]     = {v[8], v[9], v[10]};
+  if (v.size() > 11) c["VelX"]    = {v[11]};
+  if (v.size() > 12) c["Presion"] = {v[12]};
+  return c;
+}
+
+int main()
+{
+    std::vector<PortInfo> serialDevicesInfo = getSerialDevicesInfo();
+    Serial serial1;
+
+    Winp window = createWindow(1910, 1000, "Cyberdeck GUI", 30, FLAG_WINDOW_RESIZABLE);
+    CyUI cy;
+
+    cy.menubar.setDevices(serialDevicesInfo);
+    cy.menubar.setSerialPort(&serial1);
+
+    // Layout
+
+    CyRealtimePlot azPlot{"Az", "g", "s"};
+    azPlot.setInitialPos(ImVec2(1634, 24));
+    cy.addElement("azPlot", &azPlot);
+
+    CyGauge accGauge{"Aceleracion", "g", 0.0f, 10.0f};
+    accGauge.setInitialPos(ImVec2(1642, 388));
+    cy.addElement("accGauge", &accGauge);
+
+
+    CyRealtimePlot velPlot{"Velocidad", "m/s", "s"};
+    velPlot.setInitialPos(ImVec2(1197, 33));
+    cy.addElement("velPlot", &velPlot);
+
+    CyRealtimePlot axPlot{"Ax", "g", "s"};
+    axPlot.setInitialPos(ImVec2(5, 24));
+    cy.addElement("axPlot", &axPlot);
+    
+    CyGauge altGauge{"Altitud", "m", 0.0f, 2000.0f};
+    altGauge.setInitialPos(ImVec2(935, 36));
+    cy.addElement("altGauge", &altGauge);
+
+
+    CyRealtimePlot accPlot{"Aceleracion total", "g", "s"};
+    accPlot.setInitialPos(ImVec2(5, 752));
+    cy.addElement("accPlot", &accPlot);
+
+    CyGauge velGauge{"|Velocidad|", "m/s", 0.0f, 250.0f, 10};
+    velGauge.setInitialPos(ImVec2(1361, 401));
+    cy.addElement("velGauge", &velGauge);
+
+
+    CyRealtimePlot altPlot{"Altitud", "m", "s"};
+    altPlot.dheight = -1;
+    altPlot.setInitialPos(ImVec2(286, 175));
+    altPlot.setInitialSize(ImVec2(552, 508));
+    cy.addElement("altPlot", &altPlot);
+
+    CyRealtimePlot ayPlot{"Ay", "g", "s"};
+    ayPlot.setInitialPos(ImVec2(5, 508));
+    cy.addElement("ayPlot", &ayPlot);
+
+    CySerialCombo receptora2{"Receptora 2"};
+    receptora2.setInitialPos(ImVec2(100, 100));
+    receptora2.setInitialSize(ImVec2(607, -1));
+    // receptora2.setDevices();
+    cy.addElement("receptora2", &receptora2);
+    
+
+    // Cy3DView rocketview{"Rocket"};
+    // rocketview.loadModels();
+    // cy.addElement("Rocket", &rocketview);
+
+
+    CyImage logo{"Logo", "resources/puinv.png"};
+    logo.setInitialPos(ImVec2(1082, 528));
+    logo.setInitialSize(ImVec2(230, 230));
+    logo.loadTexture();
+    cy.addElement("logo", &logo);
+
+    // ---
+
+    bool disconnected = false;
+
+    // Bytes recibidos que todavía no forman una línea completa
+    std::string bufferSerial;
+
+    // Tiempo de la Cyberdeck al recibir el primer dato (si millis llega en 0)
+    double t0 = -1.0;
+
+    while (!window->ShouldClose())
+    {
+        startFrame(window);
+
+        if (disconnected && cy.menubar.isPortSel())
+        {
+            try
+            {
+            serial1.open();
+            disconnected = false;
+            } catch (const std::exception& e) {
+            
+            }
+        }
+
+        if (serial1.isOpen())
+        {
+            try
+            {
+            size_t n = serial1.available();
+            if (n > 0)
+            {
+                // Acumular lo recibido y procesar SOLO líneas completas
+                bufferSerial += serial1.read(n);
+                if (bufferSerial.size() > 4096) bufferSerial.clear();
+
+                size_t p;
+                while ((p = bufferSerial.find('\n')) != std::string::npos)
+                {
+                std::string line = bufferSerial.substr(0, p);
+                bufferSerial.erase(0, p + 1);
+                if (!line.empty() && line.back() == '\r') line.pop_back();
+                if (line.empty()) continue;
+
+                std::cout << line << std::endl;
+
+                // Detectar el formato: si trae '=', es la receptora LoRa
+                Campos c = (line.find('=') != std::string::npos)
+                         ? leerClaveValor(line)
+                         : leerCSV(line);
+
+                // Líneas que no son datos ("LoRa listo...", encabezados): ignorar
+                if (c.count("Alt") == 0 && c.count("Acc") == 0 && c.count("VelX") == 0)
+                {
+                    continue;
+                }
+                count++;
+
+                // Eje X: tiempo del cohete si es válido; si no, el de la Cyberdeck
+                float t = 0.0f;
+                if (c.count("t")) t = c["t"][0] / 1000.0f;
+                if (t <= 0.0f)
+                {
+                    if (t0 < 0.0) t0 = GetTime();
+                    t = (float)(GetTime() - t0);
+                }
+
+                // Altitud
+                if (c.count("Alt"))
+                {
+                    float alt = c["Alt"][0];
+                    cy.getRTPlot("altPlot")->addPoint(t, alt);
+                    cy.getGauge("altGauge")->setVal(alt);
+                }
+
+                // Aceleraciones: llegan en m/s², se muestran en g
+                if (c.count("Acc") && c["Acc"].size() >= 3)
+                {
+                    float ax = c["Acc"][0] / G;
+                    float ay = c["Acc"][1] / G;
+                    float az = c["Acc"][2] / G;
+                    cy.getRTPlot("axPlot")->addPoint(t, ax);
+                    cy.getRTPlot("ayPlot")->addPoint(t, ay);
+                    cy.getRTPlot("azPlot")->addPoint(t, az);
+
+                    float total = std::sqrt(ax*ax + ay*ay + az*az);
+                    cy.getRTPlot("accPlot")->addPoint(t, total);
+                    cy.getGauge("accGauge")->setVal(total);
+                }
+
+                // Velocidad (VelX). La gráfica conserva el signo;
+                // el manómetro muestra la magnitud.
+                if (c.count("VelX"))
+                {
+                    float vel = c["VelX"][0];
+                    cy.getRTPlot("velPlot")->addPoint(t, vel);
+                    cy.getGauge("velGauge")->setVal(std::fabs(vel));
+                }
+                }
+            }
+            } catch (const std::exception& e) {
+                // std::cerr << "Error: " << e.what() << std::endl;
+                serial1.close();
+                disconnected = true;
+                bufferSerial.clear();
+            }
+        }
+
+        // ---- Comando para iniciar la transmisión ----
+        // Solo para la prueba por USB directo: ese firmware espera la letra
+        // 'a' (while(Serial.read() != 97)) antes de enviar. La receptora LoRa
+        // NO la necesita; envía sola en cuanto recibe paquetes.
+        ImGui::SetNextWindowPos(ImVec2(1361, 650), ImGuiCond_Once);
+        if (ImGui::Begin("Comandos"))
+        {
+            ImGui::BeginDisabled(!serial1.isOpen());
+            if (ImGui::Button("Iniciar transmision ('a')"))
+            {
+                try
+                {
+                    serial1.write("a");
+                    std::cout << "Enviado: a" << std::endl;
+                } catch (const std::exception& e) {
+                    std::cerr << "No se pudo enviar: " << e.what() << std::endl;
+                }
+            }
+            ImGui::EndDisabled();
+            if (!serial1.isOpen()) ImGui::TextDisabled("Conecta un puerto primero");
+            ImGui::TextDisabled("(No hace falta con la receptora LoRa)");
+        }
+        ImGui::End();
+
+        std::vector<CYRETCODE> rs = cy.updateAll();
+        for (CYRETCODE r : rs)
+        {
+            switch (r) {
+                case CYRETCODE::OK:
+                    break;
+
+                case CYRETCODE::NO_PORTS:
+                    serialDevicesInfo = getSerialDevicesInfo();
+                    cy.menubar.setDevices(serialDevicesInfo);
+                    break;
+            }
+        }
+
+        // ImGui::ShowDemoWindow();
+
+        // ImPlot::ShowDemoWindow();
+
+        ImGui::ShowMetricsWindow();
+
+
+        endFrame(window);
+    }
+
+    closeWindow(window);
+    return 0;
+}
